@@ -1,0 +1,48 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[dev]
+  command = "npm run dev:web"
+  targetPort = 5173
+  port = 8888
+  autoLaunch = false
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+# netlify dev quirk: the CLI checks non-forced rewrites against build.publish (dist/),
+# so Vite dev-module paths (absent from dist) get swallowed by the SPA fallback and the
+# app won't boot locally. These self-rewrites match first and proxy through to Vite
+# untouched. In production these paths are never requested; a stray hit 404s as it should.
+[[redirects]]
+  from = "/src/*"
+  to = "/src/:splat"
+  status = 200
+[[redirects]]
+  from = "/@vite/*"
+  to = "/@vite/:splat"
+  status = 200
+[[redirects]]
+  from = "/@react-refresh"
+  to = "/@react-refresh"
+  status = 200
+[[redirects]]
+  from = "/@fs/*"
+  to = "/@fs/:splat"
+  status = 200
+[[redirects]]
+  from = "/@id/*"
+  to = "/@id/:splat"
+  status = 200
+[[redirects]]
+  from = "/node_modules/*"
+  to = "/node_modules/:splat"
+  status = 200
+
+# SPA fallback (API routes are claimed by functions via their own `path` config)
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

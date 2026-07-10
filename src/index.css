@@ -1,0 +1,17 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand: #f97316; /* safety orange accent */
+  --color-ink: #0f172a;   /* deep slate */
+}
+
+html, body, #root { height: 100%; }
+body { @apply bg-slate-950 text-slate-100 antialiased; }
+
+/* streaming caret */
+.caret::after {
+  content: "▋";
+  animation: blink 1s steps(1) infinite;
+  @apply text-orange-400;
+}
+@keyframes blink { 50% { opacity: 0; } }

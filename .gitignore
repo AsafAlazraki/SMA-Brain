@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.netlify/
+.env
+.env.*
+!.env.example
+supabase/.temp/
+supabase/.branches/
+*.local
+.DS_Store
+coverage/
+.playwright-mcp/
+_to_delete/
+.claude/
