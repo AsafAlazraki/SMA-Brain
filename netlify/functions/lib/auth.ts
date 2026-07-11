@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
+import { createRemoteJWKSet, jwtVerify } from 'jose'
 import { env, isSupabaseConfigured, isSupabasePartiallyConfigured } from './env'
 import { jsonResponse } from './sse'
 
@@ -24,11 +25,30 @@ export function serviceClient(): SupabaseClient {
 
 export type AuthResult = { user: AuthedUser; failure?: never } | { user?: never; failure: Response }
 
+// Supabase signs access tokens with ES256; the public keys live at the JWKS
+// endpoint. jose caches keys in-process, so warm invocations verify with ZERO
+// network hops — vs the two ~200ms cross-region round-trips (auth.getUser +
+// profiles select) the old path paid on EVERY request.
+let jwks: ReturnType<typeof createRemoteJWKSet> | null = null
+function remoteJwks() {
+  jwks ??= createRemoteJWKSet(new URL(`${env.SUPABASE_URL}/auth/v1/.well-known/jwks.json`))
+  return jwks
+}
+
+type SupabaseClaims = {
+  sub?: string
+  email?: string
+  app_metadata?: { role?: string }
+  user_metadata?: { display_name?: string }
+}
+
 /**
- * Verify the caller's Supabase JWT and load their profile role.
- * Every /api/* function calls this (or requireAdmin) before doing anything.
- * RLS remains the security boundary for direct-to-Supabase reads; this guards
- * the service-role paths that functions use.
+ * Verify the caller's Supabase JWT locally (signature + expiry + audience) and
+ * read the role from its claims. Every /api/* function calls this (or
+ * requireAdmin) before doing anything. RLS remains the security boundary for
+ * direct-to-Supabase reads; this guards the service-role paths functions use.
+ * Note: a role change lands on the user's next token refresh (≤1h) — invite
+ * paths set app_metadata.role at creation, so claims are authoritative.
  */
 export async function authenticate(req: Request): Promise<AuthResult> {
   if (!isSupabaseConfigured) {
@@ -44,15 +64,32 @@ export async function authenticate(req: Request): Promise<AuthResult> {
   const token = /^Bearer\s+(.+)$/i.exec(header)?.[1]
   if (!token) return { failure: jsonResponse(401, { error: 'Sign in required' }) }
 
-  const { data, error } = await serviceClient().auth.getUser(token)
-  if (error || !data.user) {
+  let claims: SupabaseClaims
+  try {
+    const { payload } = await jwtVerify(token, remoteJwks(), { audience: 'authenticated' })
+    claims = payload as SupabaseClaims
+  } catch {
     return { failure: jsonResponse(401, { error: 'Session expired — please sign in again' }) }
   }
+  if (!claims.sub) return { failure: jsonResponse(401, { error: 'Session expired — please sign in again' }) }
 
+  const claimRole = claims.app_metadata?.role
+  if (claimRole === 'admin' || claimRole === 'staff') {
+    return {
+      user: {
+        id: claims.sub,
+        email: claims.email ?? null,
+        role: claimRole,
+        displayName: claims.user_metadata?.display_name ?? '',
+      },
+    }
+  }
+
+  // Legacy tokens without a role claim: fall back to the profiles table.
   const { data: profile, error: profileError } = await serviceClient()
     .from('profiles')
     .select('role, display_name')
-    .eq('user_id', data.user.id)
+    .eq('user_id', claims.sub)
     .maybeSingle()
   if (profileError) {
     // transient DB failure ≠ missing profile — retryable 500, not a "contact your admin" 403
@@ -61,11 +98,10 @@ export async function authenticate(req: Request): Promise<AuthResult> {
   if (!profile) {
     return { failure: jsonResponse(403, { error: 'No profile for this account — ask an admin to set you up' }) }
   }
-
   return {
     user: {
-      id: data.user.id,
-      email: data.user.email ?? null,
+      id: claims.sub,
+      email: claims.email ?? null,
       role: profile.role === 'admin' ? 'admin' : 'staff',
       displayName: profile.display_name ?? '',
     },
