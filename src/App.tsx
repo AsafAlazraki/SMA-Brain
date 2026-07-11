@@ -1,9 +1,12 @@
+import { useEffect } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import { useAuth } from './lib/auth'
 import { CallProvider } from './lib/call/CallProvider'
+import { prewarmApi } from './lib/prewarm'
 
 export default function App() {
   const { profile, isMockMode, signOut } = useAuth()
+  useEffect(() => prewarmApi(), [])
 
   // Kept deliberately short — staff live in the call; these are the "look at it" surfaces.
   const tabs = [
