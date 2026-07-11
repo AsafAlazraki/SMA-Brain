@@ -19,6 +19,7 @@
     "seed:users": "tsx scripts/seed-users.ts",
     "seed:products": "tsx scripts/seed-sample-products.ts",
     "build:vocab": "tsx scripts/build-vocab.ts",
+    "import:cards": "tsx scripts/import-cards.ts",
     "ingest:catalog": "tsx scripts/ingest-catalog.ts",
     "check:secrets": "bash scripts/check-secrets.sh",
     "db:start": "supabase start",

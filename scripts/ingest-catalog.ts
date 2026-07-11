@@ -21,6 +21,11 @@
  * - Safety valve: hard cap of 800 fetched pages per run; truncation is logged.
  *
  * Usage: npm run ingest:catalog  (env: SUPABASE_URL|VITE_SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY)
+ * Options (env, all optional — defaults preserve the standard full run):
+ *   SECTION=accessories[,parts,machines]  crawl only the named sections
+ *   CAP=1200                              page budget for this run (default 800)
+ *   SKIP_KNOWN=1                          skip listing products whose URL is already
+ *                                         in the DB (fast catch-up; no change detection)
  */
 import './lib/load-env'
 import { createClient } from '@supabase/supabase-js'
@@ -28,7 +33,16 @@ import { createClient } from '@supabase/supabase-js'
 const BASE = 'https://www.sewingmachinesaustralia.com.au'
 const USER_AGENT = 'SMABrainBot/1.0 (internal catalog sync)'
 const REQUEST_DELAY_MS = 1200
-const PAGE_CAP = 800
+const DEFAULT_PAGE_CAP = 800
+const PAGE_CAP = (() => {
+  const n = Number(process.env.CAP ?? DEFAULT_PAGE_CAP)
+  return Number.isInteger(n) && n > 0 ? n : DEFAULT_PAGE_CAP
+})()
+const SECTION_FILTER = (process.env.SECTION ?? '')
+  .split(',')
+  .map((s) => s.trim().toLowerCase())
+  .filter(Boolean)
+const SKIP_KNOWN = process.env.SKIP_KNOWN === '1' || process.env.SKIP_KNOWN === 'true'
 const FETCH_TIMEOUT_MS = 30_000
 
 const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
@@ -480,6 +494,35 @@ function rowsEqual(a: ProductRow, b: ProductRow): boolean {
 /** In-run cache so a product tiled in two categories is written once. */
 const seenThisRun = new Map<string, { id: string; detailScraped: boolean }>()
 
+/** url → existing scraped row, loaded at startup and kept fresh during the run.
+ *  Powers SKIP_KNOWN and lets enrichment resume across runs/sections. */
+interface KnownProduct {
+  id: string
+  hasDetail: boolean
+}
+const known = new Map<string, KnownProduct>()
+
+async function loadKnownProducts(): Promise<void> {
+  const page = 1000
+  for (let from = 0; ; from += page) {
+    const { data, error } = await db
+      .from('products')
+      .select('id, url, specs')
+      .eq('source', 'scrape')
+      .order('id')
+      .range(from, from + page - 1)
+    if (error) {
+      errors.push(`load known products: ${error.message}`)
+      return
+    }
+    const rows = (data ?? []) as Array<{ id: string; url: string | null; specs: Record<string, unknown> | null }>
+    for (const r of rows) {
+      if (r.url) known.set(r.url, { id: r.id, hasDetail: r.specs?.detail_scraped === true })
+    }
+    if (rows.length < page) break
+  }
+}
+
 async function upsertProduct(row: ProductRow): Promise<UpsertResult> {
   const { data: existing, error: selErr } = await db
     .from('products')
@@ -509,6 +552,7 @@ async function upsertProduct(row: ProductRow): Promise<UpsertResult> {
       return 'error'
     }
     seenThisRun.set(row.url, { id: created.id, detailScraped: row.specs.detail_scraped === true })
+    known.set(row.url, { id: created.id, hasDetail: row.specs.detail_scraped === true })
     return 'new'
   }
 
@@ -524,6 +568,7 @@ async function upsertProduct(row: ProductRow): Promise<UpsertResult> {
     specs: { ...(existing.specs ?? {}), ...row.specs },
   }
   seenThisRun.set(row.url, { id: existing.id, detailScraped: merged.specs.detail_scraped === true })
+  known.set(row.url, { id: existing.id, hasDetail: merged.specs.detail_scraped === true })
   if (rowsEqual(merged, existing)) return 'unchanged'
   const { error } = await db
     .from('products')
@@ -621,6 +666,13 @@ async function crawlSection(seed: { section: Section; path: string; title: strin
     for (const product of products) {
       const productUrl = BASE + product.path
       if (seenThisRun.has(productUrl)) continue
+      const alreadyKnown = known.get(productUrl)
+      if (SKIP_KNOWN && alreadyKnown) {
+        seenThisRun.set(productUrl, { id: alreadyKnown.id, detailScraped: alreadyKnown.hasDetail })
+        bump(section, 'unchanged')
+        tally.unchanged++
+        continue
+      }
       const { brand, model } = parseBrandModel(product.name, item.trail)
       const specs: Record<string, unknown> = {}
       if (product.price.note) specs.price_note = product.price.note
@@ -655,12 +707,16 @@ async function crawlSection(seed: { section: Section; path: string; title: strin
   }
 }
 
-/** Spend leftover page budget on .html detail pages that still lack descriptions. */
+/** Spend leftover page budget on .html detail pages that still lack descriptions.
+ *  Candidates come from the whole DB (not just this run), accessories before parts,
+ *  so section-filtered catch-up runs keep making progress. */
 async function enrichDetails(rules: RobotsRules): Promise<{ enriched: number; pending: number }> {
-  const candidates = [...seenThisRun.entries()]
-    .filter(([candidateUrl, meta]) => candidateUrl.endsWith('.html') && !meta.detailScraped)
+  const group = (u: string): number =>
+    u.includes('/shop/buy-accessories/') ? 0 : u.includes('/shop/buy-spare-parts/') ? 1 : 2
+  const candidates = [...known.entries()]
+    .filter(([candidateUrl, meta]) => candidateUrl.endsWith('.html') && !meta.hasDetail)
     .map(([candidateUrl]) => candidateUrl)
-    .sort()
+    .sort((a, b) => group(a) - group(b) || a.localeCompare(b))
   let enriched = 0
   let index = 0
   console.log(`\nEnrichment: ${candidates.length} products lack detail-page data; budget ${Math.max(0, PAGE_CAP - pagesFetched)} pages`)
@@ -675,7 +731,7 @@ async function enrichDetails(rules: RobotsRules): Promise<{ enriched: number; pe
     try {
       const html = await fetchPage(path)
       const detail = parseDetailPage(html)
-      const meta = seenThisRun.get(productUrl)!
+      const meta = known.get(productUrl)!
       const patch: Record<string, unknown> = { scraped_at: new Date().toISOString() }
       if (detail.description) patch.description = detail.description
       if (detail.image) patch.image_url = detail.image
@@ -693,8 +749,12 @@ async function enrichDetails(rules: RobotsRules): Promise<{ enriched: number; pe
         patch.specs = specs
         error = (await db.from('products').update(patch).eq('id', meta.id)).error
       }
-      if (error) errors.push(`enrich ${productUrl}: ${error.message}`)
-      else enriched++
+      if (error) {
+        errors.push(`enrich ${productUrl}: ${error.message}`)
+      } else {
+        enriched++
+        known.set(productUrl, { id: meta.id, hasDetail: true })
+      }
     } catch (err) {
       errors.push(`enrich ${productUrl}: ${err instanceof Error ? err.message : String(err)}`)
     }
@@ -706,18 +766,30 @@ async function enrichDetails(rules: RobotsRules): Promise<{ enriched: number; pe
 // ---------- main ----------
 
 async function main(): Promise<void> {
-  console.log(`Catalog ingest — ${BASE} → products table (cap ${PAGE_CAP} pages, ${REQUEST_DELAY_MS}ms delay)\n`)
+  const unknownSections = SECTION_FILTER.filter((s) => !SECTIONS.some((seed) => seed.section === s))
+  if (unknownSections.length > 0) {
+    console.error(`Unknown SECTION value(s): ${unknownSections.join(', ')} (valid: machines, parts, accessories)`)
+    process.exit(1)
+  }
+  const active = SECTIONS.filter((seed) => SECTION_FILTER.length === 0 || SECTION_FILTER.includes(seed.section))
+  console.log(
+    `Catalog ingest — ${BASE} → products table (cap ${PAGE_CAP} pages, ${REQUEST_DELAY_MS}ms delay, ` +
+      `sections: ${active.map((s) => s.section).join('+')}${SKIP_KNOWN ? ', skip-known on' : ''})\n`,
+  )
 
   const rules = await fetchRobots()
-  for (const seed of SECTIONS) {
+  for (const seed of active) {
     if (!robotsAllows(rules, seed.path)) {
       console.error(`robots.txt disallows ${seed.path} — stopping without crawling.`)
       process.exit(1)
     }
   }
-  console.log(`robots.txt OK (${rules.disallow.length} disallow rules; /shop permitted)\n`)
+  console.log(`robots.txt OK (${rules.disallow.length} disallow rules; /shop permitted)`)
 
-  for (const seed of SECTIONS) {
+  await loadKnownProducts()
+  console.log(`known scraped products in DB: ${known.size}\n`)
+
+  for (const seed of active) {
     await crawlSection(seed, rules)
   }
 
@@ -728,7 +800,7 @@ async function main(): Promise<void> {
     { new: 0, updated: 0, unchanged: 0 },
   )
   console.log('\n---')
-  for (const seed of SECTIONS) {
+  for (const seed of active) {
     const s = stats[seed.section]
     console.log(`${seed.section}: ${s.categories} category pages, ${s.new} new, ${s.updated} updated, ${s.unchanged} unchanged`)
   }
