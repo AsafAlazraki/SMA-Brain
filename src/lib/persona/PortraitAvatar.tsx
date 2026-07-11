@@ -46,13 +46,15 @@ export function PortraitAvatar({
         blinkStart = now
         nextBlink = now + 1800 + Math.random() * 3600
       }
-      let lid = 0
+      // snap blink — no crossfade frames (ghosting between non-identical
+      // portrait variants looks wrong; a 1-frame swap reads as a real blink)
+      let lidsDown = false
       if (blinkStart > 0) {
-        const p = (now - blinkStart) / 130
-        lid = p >= 2 ? 0 : p <= 1 ? p : 2 - p
-        if (p >= 2) blinkStart = 0
+        const elapsed = now - blinkStart
+        lidsDown = elapsed < 110
+        if (elapsed >= 110) blinkStart = 0
       }
-      if (eyesRef.current) eyesRef.current.style.opacity = String(lid)
+      if (eyesRef.current) eyesRef.current.style.opacity = lidsDown ? '1' : '0'
 
       const target = s === 'speaking' ? Math.min(1, level * 2.1) : 0
       open += (target - open) * 0.45

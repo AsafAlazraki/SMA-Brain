@@ -13,6 +13,6 @@ export const PORTRAIT = {
   mouthOpen: '/persona/mouth-open.png',
   /** eye band (incl. brows): x, y, w, h in % of the image; dx/dy nudge the variant texture */
   eyes: { x: 30, y: 20, w: 40, h: 19, dx: 0, dy: 0 },
-  /** mouth region (incl. chin shift on the "ah") */
-  mouth: { x: 39, y: 37, w: 23, h: 19, dx: 0, dy: 0 },
+  /** mouth region — starts BELOW the eyes (overlap made her eyes bulge while talking) */
+  mouth: { x: 41, y: 41, w: 19, h: 13, dx: 0, dy: 0 },
 } as const
