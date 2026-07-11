@@ -53,43 +53,48 @@ export default function DraftPage() {
   return (
     <div className="mx-auto grid h-full max-w-6xl gap-4 p-4 md:grid-cols-2">
       <section className="flex min-h-0 flex-col gap-2">
-        <h2 className="text-sm font-semibold text-slate-400">Customer's email</h2>
+        <h2 className="stamp !text-cloth-400">Their email</h2>
         <textarea
           value={customerEmail}
           onChange={(e) => setCustomerEmail(e.target.value)}
           placeholder="Paste the customer's email here — threads are fine, we'll find the questions…"
-          className="min-h-0 flex-1 resize-none rounded-xl border border-slate-700 bg-slate-900 p-4 text-sm leading-relaxed text-slate-100 placeholder:text-slate-600 focus:border-orange-500/60 focus:outline-none"
+          className="field min-h-0 flex-1 resize-none p-4 text-[14px] leading-relaxed"
         />
         <button
           onClick={() => void generate()}
           disabled={busy || !customerEmail.trim()}
-          className="min-h-11 rounded-xl bg-orange-500 px-5 text-sm font-semibold text-slate-950 transition disabled:opacity-40"
+          className="btn-safety display min-h-12 px-5 text-lg tracking-wide"
         >
           {busy ? 'Drafting…' : 'Draft reply in Tony’s voice'}
         </button>
         {mined.length > 0 && (
-          <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-2 text-xs text-slate-400">
-            <span className="text-slate-500">They're asking:</span> {mined.join(' · ')}
+          <div className="stitched rounded-md bg-steel-900/60 px-3 py-2">
+            <span className="stamp">They're asking</span>
+            <p className="mt-1 text-[13px] leading-snug text-cloth-400">{mined.join(' · ')}</p>
           </div>
         )}
       </section>
 
       <section className="flex min-h-0 flex-col gap-2">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-slate-400">Draft reply — edit freely</h2>
+          <h2 className="stamp !text-cloth-400">Your reply — edit freely</h2>
           <button
             onClick={() => void copyOut()}
             disabled={!draft || busy}
-            className="min-h-11 rounded-lg border border-slate-700 px-3 text-xs font-medium text-slate-300 transition hover:border-orange-500/50 disabled:opacity-40"
+            className={`stamp min-h-11 rounded border px-3 transition disabled:opacity-40 ${
+              copied
+                ? 'border-go-500/60 !text-go-500'
+                : 'border-steel-600 !text-cloth-400 hover:border-safety-500/60 hover:!text-cloth-100'
+            }`}
           >
-            {copied ? '✓ Copied (brain is learning)' : 'Copy'}
+            {copied ? '✓ Copied — brain is learning' : 'Copy'}
           </button>
         </div>
         <textarea
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           placeholder="The drafted reply appears here, streaming…"
-          className="min-h-0 flex-1 resize-none rounded-xl border border-slate-700 bg-slate-900 p-4 text-sm leading-relaxed text-slate-100 placeholder:text-slate-600 focus:border-orange-500/60 focus:outline-none"
+          className="field min-h-0 flex-1 resize-none p-4 text-[14px] leading-relaxed"
         />
       </section>
     </div>

@@ -1,17 +1,191 @@
 @import "tailwindcss";
+@import "@fontsource-variable/big-shoulders";
+@import "@fontsource-variable/archivo";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/600.css";
+
+/*
+  Tony's Brain — "The Workshop Bench"
+  Industrial-workshop system: machined steel surfaces, denim twill (the fabric
+  these machines sew), stitch-line seams, safety-orange controls. Dark-first,
+  built to be read mid-phone-call. Tokens mirrored in src/theme.ts.
+*/
 
 @theme {
-  --color-brand: #f97316; /* safety orange accent */
-  --color-ink: #0f172a;   /* deep slate */
+  /* iron & steel — page + surfaces */
+  --color-iron-950: #0a0d13;
+  --color-iron-900: #0e1219;
+  --color-steel-900: #121826;
+  --color-steel-800: #1a2333;
+  --color-steel-700: #263349;
+  --color-steel-600: #33445f;
+
+  /* denim — the material */
+  --color-denim-500: #48679c;
+  --color-denim-400: #7c97c9;
+  --color-denim-300: #a7bcdf;
+
+  /* cloth — text */
+  --color-cloth-100: #edf1f8;
+  --color-cloth-400: #97a5bc;
+  --color-cloth-600: #5c6a81;
+
+  /* safety orange — controls & seams */
+  --color-safety-500: #ff6b1a;
+  --color-safety-400: #ff8442;
+  --color-safety-950: #1f0e03;
+
+  /* signals */
+  --color-go-500: #59c983;
+  --color-stop-500: #e5484d;
+
+  --font-display: "Big Shoulders Variable", "Archivo Variable", sans-serif;
+  --font-sans: "Archivo Variable", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
 }
 
 html, body, #root { height: 100%; }
-body { @apply bg-slate-950 text-slate-100 antialiased; }
 
-/* streaming caret */
-.caret::after {
-  content: "▋";
-  animation: blink 1s steps(1) infinite;
-  @apply text-orange-400;
+body {
+  @apply bg-iron-950 text-cloth-100 antialiased;
+  font-family: var(--font-sans);
+  /* denim twill: two crossed diagonal weaves + a soft overhead-lamp vignette */
+  background-image:
+    radial-gradient(120% 70% at 50% -10%, rgba(124, 151, 201, 0.07), transparent 60%),
+    repeating-linear-gradient(63deg, rgba(124, 151, 201, 0.028) 0 1px, transparent 1px 7px),
+    repeating-linear-gradient(-63deg, rgba(124, 151, 201, 0.018) 0 1px, transparent 1px 9px);
+  background-attachment: fixed;
 }
-@keyframes blink { 50% { opacity: 0; } }
+
+/* ── stitched seam (machine stitching) ─────────────────────── */
+.seam {
+  height: 2px;
+  background-image: repeating-linear-gradient(
+    90deg,
+    var(--color-safety-500) 0 9px,
+    transparent 9px 16px
+  );
+  opacity: 0.85;
+}
+.seam-denim {
+  background-image: repeating-linear-gradient(
+    90deg,
+    var(--color-denim-500) 0 9px,
+    transparent 9px 16px
+  );
+}
+
+/* fabric patch: dashed stitch border, used on user messages + accents */
+.stitched {
+  border: 1.5px dashed color-mix(in srgb, var(--color-denim-400) 55%, transparent);
+}
+
+/* bench plate: machined card */
+.plate {
+  background: var(--color-steel-900);
+  border: 1px solid var(--color-steel-700);
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.45);
+}
+
+/* stamped uppercase label */
+.stamp {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-cloth-600);
+}
+
+/* display headings */
+.display {
+  font-family: var(--font-display);
+  font-weight: 750;
+  text-transform: uppercase;
+  letter-spacing: 0.015em;
+}
+
+/* primary control: safety-orange machine button */
+.btn-safety {
+  @apply bg-safety-500 text-safety-950 font-bold;
+  border-radius: 5px;
+  box-shadow: 0 3px 0 color-mix(in srgb, var(--color-safety-500) 35%, #000);
+  transition: transform 80ms ease, box-shadow 80ms ease, background-color 120ms ease;
+}
+.btn-safety:hover:not(:disabled) { @apply bg-safety-400; }
+.btn-safety:active:not(:disabled) {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--color-safety-500) 35%, #000);
+}
+.btn-safety:disabled { opacity: 0.35; }
+
+/* inputs */
+.field {
+  @apply bg-iron-900 text-cloth-100 border border-steel-600;
+  border-radius: 5px;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+.field::placeholder { color: var(--color-cloth-600); }
+.field:focus {
+  outline: none;
+  border-color: var(--color-safety-500);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-safety-500) 22%, transparent);
+}
+
+/* focus ring for keyboard nav everywhere else */
+:focus-visible {
+  outline: 2px solid var(--color-safety-500);
+  outline-offset: 2px;
+}
+
+/* streaming caret: the needle */
+.caret::after {
+  content: "▍";
+  color: var(--color-safety-400);
+  animation: needle 0.9s steps(2) infinite;
+}
+@keyframes needle { 50% { opacity: 0; } }
+
+/* machine-on indicator */
+.lamp {
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  background: var(--color-safety-500);
+  box-shadow: 0 0 8px 1px color-mix(in srgb, var(--color-safety-500) 70%, transparent);
+  animation: lamp 1.1s ease-in-out infinite;
+}
+@keyframes lamp { 50% { opacity: 0.35; } }
+
+/* staggered bench reveal (login / empty states) */
+.rise { animation: rise 480ms cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.rise-1 { animation-delay: 60ms; }
+.rise-2 { animation-delay: 140ms; }
+.rise-3 { animation-delay: 220ms; }
+.rise-4 { animation-delay: 300ms; }
+@keyframes rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ruler ticks (login flourish) */
+.ruler-y {
+  background-image:
+    repeating-linear-gradient(180deg, var(--color-steel-600) 0 1px, transparent 1px 8px),
+    repeating-linear-gradient(180deg, var(--color-denim-400) 0 1.5px, transparent 1.5px 40px);
+  background-size: 7px 100%, 13px 100%;
+  background-repeat: no-repeat;
+  opacity: 0.55;
+}
+
+/* slim steel scrollbars */
+* { scrollbar-width: thin; scrollbar-color: var(--color-steel-600) transparent; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-thumb { background: var(--color-steel-600); border-radius: 4px; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+@media (prefers-reduced-motion: reduce) {
+  .rise, .rise-1, .rise-2, .rise-3, .rise-4 { animation: none; }
+  .lamp { animation: none; }
+  .caret::after { animation: none; }
+  * { transition-duration: 0.01ms !important; }
+}

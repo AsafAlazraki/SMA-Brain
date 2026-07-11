@@ -6,6 +6,16 @@ export type SSEWriter = {
   readonly response: Response
 }
 
+/**
+ * Emit an SSE comment every few seconds until the writer closes. Long silent
+ * gaps (model thinking between tool rounds) get idle streams reaped by the
+ * platform; a comment line is invisible to clients but keeps bytes flowing.
+ */
+export function startKeepalive(sse: SSEWriter, ms = 3000): () => void {
+  const timer = setInterval(() => sse.send('ping', { t: 1 }), ms)
+  return () => clearInterval(timer)
+}
+
 export function createSSE(): SSEWriter {
   const encoder = new TextEncoder()
   let controller: ReadableStreamDefaultController<Uint8Array> | null = null

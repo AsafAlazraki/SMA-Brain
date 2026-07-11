@@ -6,16 +6,20 @@ import { useAuth } from '../../lib/auth'
 export function RequireAuth() {
   const { loading, session, profile, profileError, isMockMode, retryProfile, signOut } = useAuth()
   if (isMockMode) return <Outlet />
-  if (loading) return <FullScreen>Waking the brain…</FullScreen>
+  if (loading) {
+    return (
+      <FullScreen>
+        <span className="lamp" />
+        <span className="stamp !text-cloth-400">Waking the brain…</span>
+      </FullScreen>
+    )
+  }
   if (!session) return <Navigate to="/login" replace />
   if (profileError) {
     return (
-      <FullScreen>
-        <p>Couldn't reach the brain — check your connection and try again.</p>
-        <button
-          onClick={retryProfile}
-          className="mt-4 min-h-11 rounded-xl bg-orange-500 px-5 text-sm font-semibold text-slate-950 transition"
-        >
+      <FullScreen column>
+        <p className="text-sm text-cloth-400">Couldn't reach the brain — check your connection and try again.</p>
+        <button onClick={retryProfile} className="btn-safety display mt-4 min-h-11 px-6 text-lg tracking-wide">
           Retry
         </button>
       </FullScreen>
@@ -23,11 +27,11 @@ export function RequireAuth() {
   }
   if (!profile) {
     return (
-      <FullScreen>
-        <p>Your account has no profile yet — ask an admin to set you up.</p>
+      <FullScreen column>
+        <p className="text-sm text-cloth-400">Your account has no profile yet — ask an admin to set you up.</p>
         <button
           onClick={() => void signOut()}
-          className="mt-4 min-h-11 rounded-xl border border-slate-700 px-5 text-sm font-medium text-slate-300 transition hover:border-orange-500/50"
+          className="stamp mt-4 min-h-11 rounded border border-steel-600 px-5 !text-cloth-400 transition hover:border-safety-500/60 hover:!text-cloth-100"
         >
           Sign out
         </button>
@@ -43,9 +47,9 @@ export function RequireAdmin() {
   return profile?.role === 'admin' ? <Outlet /> : <Navigate to="/chat" replace />
 }
 
-function FullScreen({ children }: { children: React.ReactNode }) {
+function FullScreen({ children, column }: { children: React.ReactNode; column?: boolean }) {
   return (
-    <div className="flex h-full flex-col items-center justify-center px-6 text-center text-sm text-slate-400">
+    <div className={`flex h-full items-center justify-center gap-3 px-6 text-center ${column ? 'flex-col' : ''}`}>
       {children}
     </div>
   )

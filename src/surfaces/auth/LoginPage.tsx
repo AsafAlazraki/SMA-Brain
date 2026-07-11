@@ -11,7 +11,12 @@ export default function LoginPage() {
 
   if (isMockMode || session) return <Navigate to="/chat" replace />
   if (loading) {
-    return <div className="flex h-full items-center justify-center text-sm text-slate-500">Waking the brain…</div>
+    return (
+      <div className="flex h-full items-center justify-center gap-3">
+        <span className="lamp" />
+        <span className="stamp !text-cloth-400">Waking the brain…</span>
+      </div>
+    )
   }
 
   async function submit(e: React.FormEvent) {
@@ -28,16 +33,25 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex h-full items-center justify-center px-4">
-      <div className="w-full max-w-sm">
-        <div className="mb-8 text-center">
-          <h1 className="text-2xl font-bold tracking-tight text-orange-400">Tony's Brain</h1>
-          <p className="mt-1 text-sm text-slate-500">Sewing Machines Australia — staff sign-in</p>
-        </div>
+    <div className="relative flex h-full items-center justify-center px-4">
+      {/* ruler ticks — workshop flourish, desktop only */}
+      <div className="ruler-y absolute inset-y-8 left-4 hidden w-4 md:block" aria-hidden />
+      <div className="ruler-y absolute inset-y-8 right-4 hidden w-4 scale-x-[-1] md:block" aria-hidden />
 
-        <form onSubmit={(e) => void submit(e)} className="space-y-3">
+      <div className="w-full max-w-sm pb-10">
+        <div className="rise mb-2 text-center">
+          <h1 className="display text-[44px] leading-none text-cloth-100">
+            Tony's <span className="text-safety-500">Brain</span>
+          </h1>
+        </div>
+        <p className="rise rise-1 stamp mb-8 text-center !text-cloth-400">
+          Sewing Machines Australia — staff sign-in
+        </p>
+
+        <div className="rise rise-2 seam mb-0" aria-hidden />
+        <form onSubmit={(e) => void submit(e)} className="rise rise-2 plate space-y-4 rounded-b-md p-5">
           <label className="block">
-            <span className="mb-1 block text-xs font-medium text-slate-400">Email</span>
+            <span className="stamp mb-1.5 block !text-cloth-400">Email</span>
             <input
               type="email"
               value={email}
@@ -45,37 +59,39 @@ export default function LoginPage() {
               autoComplete="email"
               required
               autoFocus
-              className="min-h-11 w-full rounded-xl border border-slate-700 bg-slate-900 px-4 text-sm text-slate-100 placeholder:text-slate-600 focus:border-orange-500/60 focus:outline-none"
+              className="field min-h-12 w-full px-4 text-[15px]"
               placeholder="you@sewingmachinesaustralia.com.au"
             />
           </label>
           <label className="block">
-            <span className="mb-1 block text-xs font-medium text-slate-400">Password</span>
+            <span className="stamp mb-1.5 block !text-cloth-400">Password</span>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               autoComplete="current-password"
               required
-              className="min-h-11 w-full rounded-xl border border-slate-700 bg-slate-900 px-4 text-sm text-slate-100 focus:border-orange-500/60 focus:outline-none"
+              className="field min-h-12 w-full px-4 text-[15px]"
               placeholder="••••••••"
             />
           </label>
 
           {error && (
-            <div className="rounded-lg border border-red-900/60 bg-red-950/40 px-3 py-2 text-xs text-red-300">{error}</div>
+            <p className="rounded border border-stop-500/40 bg-stop-500/10 px-3 py-2 text-sm text-stop-500">
+              {error}
+            </p>
           )}
 
           <button
             type="submit"
             disabled={busy || !email.trim() || !password}
-            className="min-h-11 w-full rounded-xl bg-orange-500 px-5 text-sm font-semibold text-slate-950 transition disabled:opacity-40"
+            className="btn-safety display min-h-12 w-full text-lg tracking-wide"
           >
             {busy ? 'Signing in…' : 'Sign in'}
           </button>
         </form>
 
-        <p className="mt-6 text-center text-xs text-slate-600">
+        <p className="rise rise-3 stamp mt-6 text-center">
           No self-signup — accounts are created by your admin. Locked out? Ask Tony.
         </p>
       </div>

@@ -45,12 +45,14 @@ const TOOLS: Anthropic.Tool[] = [
   },
 ]
 
+export type Citation = { id: string; title: string }
+
 export type AgentEvents = {
   onToken: (text: string) => void
   onTool: (name: string, status: 'start' | 'end', summary: string) => void
   onProductCard: (card: ProductHit & { fit_note: string }) => void
   onGap: (question: string) => void
-  onCitations: (ids: string[]) => void
+  onCitations: (entries: Citation[]) => void
 }
 
 /** Run the agentic chat loop, streaming into the provided callbacks. */
@@ -58,6 +60,8 @@ export async function runAgent(opts: {
   system: string
   messages: Anthropic.MessageParam[]
   maxToolRounds?: number
+  /** Latency lever: 'low' for on-a-call turns, 'medium' default. Fable 5 at low effort still answers well. */
+  effort?: 'low' | 'medium' | 'high'
   events: AgentEvents
 }): Promise<{ text: string }> {
   if (isMockLLM) return runMockAgent(opts)
@@ -68,7 +72,7 @@ export async function runAgent(opts: {
 
   const messages = [...opts.messages]
   let fullText = ''
-  const citedIds = new Set<string>()
+  const citedTitles = new Map<string, string>()
   const productsSeen = new Map<string, ProductHit>()
   const maxRounds = opts.maxToolRounds ?? 4
 
@@ -76,6 +80,7 @@ export async function runAgent(opts: {
     const stream = client.messages.stream({
       model,
       max_tokens: 1500,
+      output_config: { effort: opts.effort ?? 'medium' },
       system: [{ type: 'text', text: opts.system, cache_control: { type: 'ephemeral' } }],
       tools: TOOLS,
       messages,
@@ -102,7 +107,7 @@ export async function runAgent(opts: {
       try {
         if (tu.name === 'search_knowledge') {
           const hits = await searchKnowledge(input.query ?? '')
-          hits.forEach((h) => citedIds.add(h.id))
+          hits.forEach((h) => citedTitles.set(h.id, h.title))
           resultPayload = hits.map(({ id, title, content, tags }) => ({ id, title, content, tags }))
         } else if (tu.name === 'search_products') {
           const hits = await searchProducts(input.query ?? '')
@@ -128,10 +133,10 @@ export async function runAgent(opts: {
     messages.push({ role: 'user', content: results })
   }
 
-  // parse citations from <cited>...</cited>
+  // parse citations from <cited>...</cited>; fall back to everything retrieved
   const cited = /<cited>([^<]*)<\/cited>/.exec(fullText)?.[1]
-  const ids = cited ? cited.split(',').map((s) => s.trim()).filter(Boolean) : [...citedIds]
-  opts.events.onCitations(ids)
+  const ids = cited ? cited.split(',').map((s) => s.trim()).filter(Boolean) : [...citedTitles.keys()]
+  opts.events.onCitations(ids.map((id) => ({ id, title: citedTitles.get(id) ?? id })))
 
   return { text: fullText }
 }
@@ -174,6 +179,6 @@ async function runMockAgent(opts: Parameters<typeof runAgent>[0]): Promise<{ tex
     opts.events.onToken(word)
     await new Promise((r) => setTimeout(r, 12))
   }
-  opts.events.onCitations(hits.map((h) => h.id))
+  opts.events.onCitations(hits.map((h) => ({ id: h.id, title: h.title })))
   return { text }
 }

@@ -1,5 +1,5 @@
 import type { Config } from '@netlify/functions'
-import { createSSE, jsonResponse } from './lib/sse'
+import { createSSE, jsonResponse, startKeepalive } from './lib/sse'
 import { runAgent } from './lib/anthropic'
 import { authenticate } from './lib/auth'
 import { identityLayer, groundingLayer, modeLayer, styleLayer } from './lib/prompts/system'
@@ -45,9 +45,11 @@ export default async function handler(req: Request): Promise<Response> {
   void (async () => {
     sse.send('meta', { draftId: crypto.randomUUID() })
     sse.send('mined', { questions })
+    const stopKeepalive = startKeepalive(sse)
     try {
       await runAgent({
         system: [identityLayer(), groundingLayer(), modeLayer('draft'), styleLayer(null)].join('\n\n'),
+        effort: 'medium',
         messages: [
           {
             role: 'user',
@@ -59,13 +61,14 @@ export default async function handler(req: Request): Promise<Response> {
           onTool: (name, status, summary) => sse.send('tool', { name, status, summary }),
           onProductCard: () => {},
           onGap: (question) => sse.send('gap', { question }),
-          onCitations: (ids) => sse.send('citations', { entries: ids.map((id) => ({ id, title: id })) }),
+          onCitations: (entries) => sse.send('citations', { entries }),
         },
       })
       sse.send('done', {})
     } catch (err) {
       sse.send('error', { message: String(err) })
     } finally {
+      stopKeepalive()
       sse.close()
     }
   })()
