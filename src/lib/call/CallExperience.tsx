@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { streamSSE } from '../sse'
 import { getAccessToken } from '../supabase'
-import { startRecording, transcribeBlob, createSpeechStream, stripForSpeech, type Recorder } from '../voice'
+import { startRecording, transcribeBlob, createSpeechStream, createOrderedPlayer, stripForSpeech, type Recorder } from '../voice'
 import { Persona, type PersonaState } from '../persona/Persona'
 
 /**
@@ -20,7 +20,7 @@ export function CallExperience({ onClose }: { onClose: () => void }) {
   const [note, setNote] = useState<string | null>(null)
   const levelRef = useRef(0)
   const recorder = useRef<Recorder | null>(null)
-  const speech = useRef<ReturnType<typeof createSpeechStream> | null>(null)
+  const speech = useRef<{ stop: () => void } | null>(null)
   const conversationId = useRef<string | null>(null)
   const history = useRef<{ role: 'user' | 'assistant'; content: string }[]>([])
   const stateRef = useRef(state)
@@ -105,16 +105,21 @@ export function CallExperience({ onClose }: { onClose: () => void }) {
 
   async function answer(question: string) {
     let raw = ''
-    const stream = createSpeechStream({
-      onLevel: (l) => (levelRef.current = l),
+    const speechHandlers = {
+      onLevel: (l: number) => (levelRef.current = l),
       onStart: () => setState('speaking'),
       onEnd: () => {
         speech.current = null
         setState('idle')
         if (onCallRef.current) setTimeout(() => void startListening(), 250)
       },
-    })
-    speech.current = stream
+    }
+    // server pushes her voice down the chat stream ('audio' events) when it
+    // can; the client-side sentence synthesizer is the fallback
+    const out = {
+      player: null as ReturnType<typeof createOrderedPlayer> | null,
+      stream: null as ReturnType<typeof createSpeechStream> | null,
+    }
     try {
       const token = await getAccessToken()
       await streamSSE(
@@ -122,7 +127,16 @@ export function CallExperience({ onClose }: { onClose: () => void }) {
         { conversationId: conversationId.current, message: question, mode: 'voice', history: history.current },
         ({ event, data }) => {
           const d = data as Record<string, unknown>
-          if (event === 'meta') conversationId.current = String(d.conversationId ?? '') || null
+          if (event === 'meta') {
+            conversationId.current = String(d.conversationId ?? '') || null
+            if (d.serverAudio) {
+              out.player = createOrderedPlayer(speechHandlers)
+              speech.current = out.player
+            } else {
+              out.stream = createSpeechStream(speechHandlers)
+              speech.current = out.stream
+            }
+          }
           if (event === 'token') {
             const delta = String(d.text ?? '')
             raw += delta
@@ -130,13 +144,15 @@ export function CallExperience({ onClose }: { onClose: () => void }) {
             // drafts stream onto the screen (copyable), never into the voice
             const draftMatch = /<draft>([\s\S]*?)(<\/draft>|$)/.exec(raw)
             if (draftMatch?.[1]) setDraft(draftMatch[1].trim())
-            stream.addText(delta)
+            out.stream?.addText(delta)
           }
+          if (event === 'audio') out.player?.add(String(d.b64 ?? ''))
+          if (event === 'audio_done') out.player?.finish(Number(d.count ?? 0))
           if (event === 'error') setNote(String(d.message ?? 'The brain dropped out — try again.'))
         },
         { token },
       )
-      stream.finish()
+      out.stream?.finish()
       // keep <draft> blocks in history so "change the second line" has the draft in context
       const answerText = raw.replace(/<cited>[\s\S]*?(<\/cited>|$)/g, '').trim()
       if (answerText) {
@@ -147,13 +163,13 @@ export function CallExperience({ onClose }: { onClose: () => void }) {
         ].slice(-8)
       }
       if (!stripForSpeech(raw)) {
-        stream.stop()
+        speech.current?.stop()
         speech.current = null
         setState('idle')
         if (onCallRef.current) void startListening()
       }
     } catch (err) {
-      stream.stop()
+      speech.current?.stop()
       speech.current = null
       setNote(String(err instanceof Error ? err.message : err))
       setOnCall(false)

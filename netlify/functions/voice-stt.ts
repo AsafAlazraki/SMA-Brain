@@ -5,6 +5,7 @@ import { authenticate } from './lib/auth'
 import { env, isMockLLM, isVoiceConfigured } from './lib/env'
 import { transcribe } from './lib/voice/elevenlabs'
 import { jargonSystem } from './lib/prompts/jargon'
+import { STT_VOCAB } from './lib/stt-vocab'
 
 /**
  * Spoken audio → text. Scribe transcription + fast-tier jargon repair so
@@ -38,10 +39,25 @@ export default async function handler(req: Request): Promise<Response> {
 const JARGON_HINT =
   /\d|juki|brother|singer|pfaff|adler|siruba|newlong|seiko|highlead|typical|jack\b|zoje|tex\b|overlock|coverstitch|bartack|bobbin|walking foot|needle|thread|\b(one|two|three|four|five|six|seven|eight|nine|ten|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred)\b/i
 
+/** Spelled-out numbers ("ell you twenty eight ten") — the classic mangled-model-number tell. */
+const SPELLED_NUMBERS =
+  /\b(one|two|three|four|five|six|seven|eight|nine|ten|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred)\b/i
+
+/** Model-number-shaped tokens: "LU-2810", "DDL 8700", "135x17", "V138", "Tex 92". */
+const MODEL_TOKEN = /\b[a-z]{1,6}[- ]?\d{2,5}[a-z0-9-]*\b|\b\d{2,4}x\d{1,3}\b/gi
+
+const norm = (s: string) => s.replace(/[-\s]/g, '').toLowerCase()
+const VOCAB_NORM = new Set(STT_VOCAB.map(norm))
+
 async function repairJargon(raw: string): Promise<string> {
   const trimmed = raw.trim()
   if (!trimmed || isMockLLM) return trimmed
   if (!JARGON_HINT.test(trimmed)) return trimmed // "hello, how are ya" — nothing to repair, save the round-trip
+  // Scribe already nailed it: every model-shaped token matches known vocab and
+  // nothing is spelled out in words — repair would be a pure latency tax (~1s)
+  const modelTokens = trimmed.match(MODEL_TOKEN) ?? []
+  const unknown = modelTokens.filter((t) => !VOCAB_NORM.has(norm(t)))
+  if (unknown.length === 0 && !SPELLED_NUMBERS.test(trimmed)) return trimmed
   try {
     const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY })
     const model = env.ANTHROPIC_MODEL_FAST || env.ANTHROPIC_MODEL

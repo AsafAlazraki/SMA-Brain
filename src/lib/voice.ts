@@ -180,6 +180,61 @@ export async function speak(
 }
 
 /**
+ * Ordered playback of server-synthesized audio: /api/chat (voice mode) pushes
+ * base64 mp3 'audio' events down the SSE stream, already in sentence order.
+ * Play each as it lands; finish(count) marks how many to expect.
+ */
+export function createOrderedPlayer(handlers: {
+  onLevel?: (level: number) => void
+  onStart?: () => void
+  onEnd?: () => void
+}): { add: (b64: string) => void; finish: (count: number) => void; stop: () => void } {
+  let stopped = false
+  let started = false
+  let expected: number | null = null
+  let played = 0
+  let playChain = Promise.resolve()
+  let currentStop: (() => void) | null = null
+
+  const maybeEnd = () => {
+    if (!stopped && expected !== null && played >= expected) handlers.onEnd?.()
+  }
+
+  return {
+    add(b64) {
+      if (stopped) return
+      const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
+      const blob = new Blob([bytes], { type: 'audio/mpeg' })
+      playChain = playChain.then(async () => {
+        if (stopped) {
+          played++
+          return
+        }
+        if (!started) {
+          started = true
+          handlers.onStart?.()
+        }
+        const { stop, done } = playBlob(blob, handlers.onLevel)
+        currentStop = stop
+        await done
+        currentStop = null
+        played++
+        maybeEnd()
+      })
+    },
+    finish(count) {
+      expected = count
+      maybeEnd()
+    },
+    stop() {
+      stopped = true
+      currentStop?.()
+      handlers.onLevel?.(0)
+    },
+  }
+}
+
+/**
  * Sentence-streamed speech: feed streamed answer text in as it arrives; each
  * completed sentence is synthesized immediately (max 2 in flight — free-plan
  * concurrency) and played in order, so she starts talking on sentence one

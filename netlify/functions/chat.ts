@@ -2,8 +2,9 @@ import type { Config } from '@netlify/functions'
 import { createSSE, jsonResponse, startKeepalive } from './lib/sse'
 import { runAgent, type Citation } from './lib/anthropic'
 import { authenticate, serviceClient, MOCK_USER } from './lib/auth'
-import { isSupabaseConfigured } from './lib/env'
+import { isSupabaseConfigured, isVoiceConfigured } from './lib/env'
 import { identityLayer, groundingLayer, modeLayer } from './lib/prompts/system'
+import { synthesize } from './lib/voice/elevenlabs'
 
 export default async function handler(req: Request): Promise<Response> {
   if (req.method !== 'POST') return jsonResponse(405, { error: 'POST only' })
@@ -37,13 +38,20 @@ export default async function handler(req: Request): Promise<Response> {
   const conversationId = body.conversationId ?? crypto.randomUUID()
   const messageId = crypto.randomUUID()
 
+  // Voice mode: synthesize her voice server-side, sentence by sentence, and
+  // push it down the SAME stream as base64 'audio' events. Kills a browser↔
+  // function round-trip per sentence and overlaps synthesis with generation —
+  // the function sits ~100ms from ElevenLabs; the browser sits ~300ms from us.
+  const serverAudio = mode === 'voice' && isVoiceConfigured
+
   // run the agent without blocking the response
   void (async () => {
-    sse.send('meta', { conversationId, messageId })
+    sse.send('meta', { conversationId, messageId, serverAudio })
     const stopKeepalive = startKeepalive(sse)
     const started = Date.now()
     const citations: Citation[] = []
     const productIds: string[] = []
+    const speech = serverAudio ? createSpeechPipeline(sse, started) : null
     try {
       const { text } = await runAgent({
         system: [identityLayer(), groundingLayer(), modeLayer(mode)].join('\n\n'),
@@ -56,7 +64,10 @@ export default async function handler(req: Request): Promise<Response> {
         // teaching from the call goes to the approval queue — admins only
         captureAsUser: mode === 'voice' && user.role === 'admin' && user.id !== MOCK_USER.id ? user.id : undefined,
         events: {
-          onToken: (t) => sse.send('token', { text: t }),
+          onToken: (t) => {
+            sse.send('token', { text: t })
+            speech?.addText(t)
+          },
           onTool: (name, status, summary) => sse.send('tool', { name, status, summary }),
           onProductCard: (card) => {
             productIds.push(card.id)
@@ -69,6 +80,7 @@ export default async function handler(req: Request): Promise<Response> {
           },
         },
       })
+      if (speech) await speech.finish()
       sse.send('done', { ms: Date.now() - started })
       // record for thumbs/usage — best effort, after 'done' so it never delays the answer
       await persistTurn({ conversationId, isNewConversation, messageId, userId: user.id, question: message, answer: text, citations, productIds })
@@ -81,6 +93,95 @@ export default async function handler(req: Request): Promise<Response> {
   })()
 
   return sse.response
+}
+
+/** <cited>/<draft> blocks and markdown never reach her voice. */
+function stripSpeakable(s: string): string {
+  return s
+    .replace(/<cited>[\s\S]*?(<\/cited>|$)/g, '')
+    .replace(/<draft>[\s\S]*?(<\/draft>|$)/g, '')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*\n]+)\*/g, '$1')
+    .replace(/`([^`\n]+)`/g, '$1')
+}
+
+/**
+ * Streaming text → ordered base64 mp3 'audio' SSE events. Sentences are
+ * synthesized as they complete (max 2 in flight — ElevenLabs free concurrency)
+ * with previous_text prosody continuity; sends stay in sentence order.
+ * The 10s streaming cap is guarded: past 8s no new synthesis starts and the
+ * unspoken tail is handed to the client via 'audio_done'.
+ */
+function createSpeechPipeline(sse: ReturnType<typeof createSSE>, started: number) {
+  const SENTENCE_END = /[.!?…]+["')\]]?\s/
+  let raw = ''
+  let consumed = 0
+  let prevSentence = ''
+  let count = 0
+  let active = 0
+  const backlog: { i: number; text: string; prev: string }[] = []
+  let sendChain = Promise.resolve()
+
+  const overBudget = () => Date.now() - started > 8000
+
+  const pump = () => {
+    while (active < 2 && backlog.length > 0) {
+      const job = backlog.shift()!
+      active++
+      const audio = synthesize(stripSpeakable(job.text), job.prev || undefined)
+        .then((buf) => Buffer.from(buf).toString('base64'))
+        .catch(() => null)
+      void audio.finally(() => {
+        active--
+        pump()
+      })
+      sendChain = sendChain.then(async () => {
+        const b64 = await audio
+        if (b64) sse.send('audio', { i: job.i, b64 })
+      })
+    }
+  }
+
+  const schedule = (sentence: string) => {
+    const clean = sentence.trim()
+    if (clean.length < 2) return
+    backlog.push({ i: count++, text: clean, prev: prevSentence })
+    prevSentence = clean
+    pump()
+  }
+
+  const speakableSoFar = () => {
+    let s = stripSpeakable(raw)
+    // a partially-streamed tag ("<dra…") isn't speakable yet — hold it back
+    const tagStart = s.lastIndexOf('<')
+    if (tagStart > -1 && !s.includes('>', tagStart)) s = s.slice(0, tagStart)
+    return s
+  }
+
+  return {
+    addText(delta: string) {
+      raw += delta
+      if (overBudget()) return
+      const s = speakableSoFar()
+      for (;;) {
+        const rest = s.slice(consumed)
+        const m = SENTENCE_END.exec(rest)
+        if (!m) break
+        const end = m.index + m[0].length
+        const candidate = rest.slice(0, end)
+        if (candidate.trim().length < 24 && rest.length < 160) break
+        schedule(candidate)
+        consumed += end
+      }
+    },
+    async finish() {
+      const tail = speakableSoFar().slice(consumed).trim()
+      const spokeTail = Boolean(tail) && !overBudget()
+      if (spokeTail) schedule(tail)
+      await sendChain
+      sse.send('audio_done', { count, tail: spokeTail ? '' : tail })
+    },
+  }
 }
 
 /**
