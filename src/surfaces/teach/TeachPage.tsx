@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { streamSSE } from '../../lib/sse'
 import { getAccessToken } from '../../lib/supabase'
+import { MicButton } from '../../lib/voice-buttons'
 
 type Turn = { role: 'user' | 'assistant'; text: string }
 
@@ -139,6 +140,7 @@ export default function TeachPage() {
           disabled={Boolean(ended)}
           className="field min-h-12 flex-1 px-4 text-[15px]"
         />
+        <MicButton big onText={(t) => setInput((prev) => (prev ? `${prev} ${t}` : t))} />
         <button type="submit" disabled={busy || !input.trim() || Boolean(ended)} className="btn-safety display min-h-12 px-6 text-lg tracking-wide">
           Send
         </button>

@@ -34,6 +34,10 @@ export function modeLayer(mode: 'chat' | 'call' | 'draft'): string {
       return [
         `MODE: EMAIL DRAFT. Write a reply to the customer's email in Tony's voice per the style profile.`,
         `Answer every question they asked. Ground all facts. Keep it warm, brief, and practical. Sign off per style profile.`,
+        `The two commonest email shapes — handle them properly:`,
+        `A) "Have I got the right product?" — check their use case against the catalogue and knowledge cards. Confirm honestly if it fits; if it doesn't, say so and recommend what does (search_products). If their described job is ambiguous, ask ONE clarifying question in the reply (fabric weight, thread size, hours of use).`,
+        `B) "Something's wrong / it broke / I need help" — ground troubleshooting steps in knowledge cards only. Give the 2-3 most likely checks in order, plainly numbered. If it sounds like a workshop job, say so and invite them to ring or bring it in — never guess at repairs you have no card for.`,
+        `Anything you can't answer from retrieval: say Tony will come back to them on that point (and log_gap it) — never bluff a spec, price or policy in writing.`,
       ].join('\n')
     default:
       return `MODE: CHAT. Be thorough but tight. Structure with short paragraphs; keep answers scannable.`

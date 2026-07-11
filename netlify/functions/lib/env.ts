@@ -4,7 +4,11 @@ export const env = {
   ANTHROPIC_MODEL_FAST: process.env.ANTHROPIC_MODEL_FAST ?? '',
   SUPABASE_URL: process.env.VITE_SUPABASE_URL ?? process.env.SUPABASE_URL ?? '',
   SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY ?? '',
+  ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY ?? '',
+  ELEVENLABS_VOICE_ID: process.env.ELEVENLABS_VOICE_ID ?? '',
 }
+
+export const isVoiceConfigured = Boolean(env.ELEVENLABS_API_KEY && env.ELEVENLABS_VOICE_ID)
 
 /** Mock mode: no Anthropic key (or explicit MOCK_LLM=true) → canned streaming so the app runs with zero secrets. */
 export const isMockLLM = process.env.MOCK_LLM === 'true' || !env.ANTHROPIC_API_KEY

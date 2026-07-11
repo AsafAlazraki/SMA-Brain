@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase, isSupabaseConfigured, getAccessToken } from '../../lib/supabase'
 import { useAuth } from '../../lib/auth'
+import { MicButton } from '../../lib/voice-buttons'
 
 type QueueItem = {
   id: string
@@ -106,6 +107,7 @@ function BlurtSection() {
         className="field w-full resize-y p-4 text-[15px] leading-relaxed"
       />
       <div className="flex items-center gap-3">
+        <MicButton big onText={(t) => setTranscript((prev) => (prev ? `${prev}\n${t}` : t))} />
         <button
           onClick={() => {
             setNotice(null)

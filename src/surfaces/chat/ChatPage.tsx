@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { streamSSE } from '../../lib/sse'
-import { getAccessToken } from '../../lib/supabase'
+import { supabase, isSupabaseConfigured, getAccessToken } from '../../lib/supabase'
 import { Markdown } from '../../lib/markdown'
+import { MicButton, SpeakButton } from '../../lib/voice-buttons'
 
 type ProductCard = {
   id: string
@@ -25,6 +26,8 @@ type Turn = {
   products?: ProductCard[]
   gap?: string | null
   corrected?: boolean
+  messageId?: string
+  feedback?: 'up' | 'down'
 }
 
 const SUGGESTIONS = [
@@ -37,6 +40,44 @@ const SUGGESTIONS = [
 /** Interim: hide the model's <cited> block from display (S4 parses it server-side). */
 function displayText(text: string): string {
   return text.replace(/<cited>[\s\S]*?(<\/cited>|$)/g, '').trimEnd()
+}
+
+/** Thumbs on a finished answer → messages.feedback (Tony's usage view reads these). */
+function FeedbackButtons({ turn, onSet }: { turn: Turn; onSet: (v: 'up' | 'down') => void }) {
+  if (!isSupabaseConfigured || !turn.messageId) return null
+  const given = turn.feedback
+
+  async function send(verdict: 'up' | 'down') {
+    if (given) return
+    onSet(verdict) // optimistic — RLS only lets you rate your own conversation
+    await supabase!.from('messages').update({ feedback: verdict }).eq('id', turn.messageId!)
+  }
+
+  const base = 'flex min-h-11 min-w-11 items-center justify-center rounded border transition'
+  return (
+    <div className="flex items-center gap-1.5" role="group" aria-label="Rate this answer">
+      <button
+        onClick={() => void send('up')}
+        disabled={Boolean(given)}
+        aria-label="Good answer"
+        className={`${base} ${given === 'up' ? 'border-go-500/70 text-go-500' : 'border-steel-700 text-cloth-600 hover:border-go-500/50 hover:text-go-500'} ${given === 'down' ? 'opacity-30' : ''}`}
+      >
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M7 10v12M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z" />
+        </svg>
+      </button>
+      <button
+        onClick={() => void send('down')}
+        disabled={Boolean(given)}
+        aria-label="Bad answer"
+        className={`${base} ${given === 'down' ? 'border-stop-500/70 text-stop-500' : 'border-steel-700 text-cloth-600 hover:border-stop-500/50 hover:text-stop-500'} ${given === 'up' ? 'opacity-30' : ''}`}
+      >
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ transform: 'rotate(180deg)' }}>
+          <path d="M7 10v12M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z" />
+        </svg>
+      </button>
+    </div>
+  )
 }
 
 /** Flag a wrong answer → correction goes to Tony's approval queue. */
@@ -80,7 +121,7 @@ function CorrectionFlow({ turn, question, onSent }: { turn: Turn; question: stri
   }
 
   return (
-    <div className="stitched space-y-2 rounded-md bg-steel-900/60 p-3">
+    <div className="stitched w-full space-y-2 rounded-md bg-steel-900/60 p-3">
       <p className="stamp !text-cloth-400">What's the right answer?</p>
       <textarea
         value={text}
@@ -136,7 +177,10 @@ export default function ChatPage() {
         { conversationId: conversationId.current, message: question, mode: callMode ? 'call' : 'chat' },
         ({ event, data }) => {
           const d = data as Record<string, unknown>
-          if (event === 'meta') conversationId.current = String(d.conversationId ?? '') || null
+          if (event === 'meta') {
+            conversationId.current = String(d.conversationId ?? '') || null
+            patch((l) => ({ ...l, messageId: String(d.messageId ?? '') || undefined }))
+          }
           if (event === 'tool') patch((l) => ({ ...l, toolStatus: d.status === 'end' ? null : String(d.summary ?? 'thinking…') }))
           if (event === 'token') patch((l) => ({ ...l, text: l.text + String(d.text ?? '') }))
           if (event === 'citations') patch((l) => ({ ...l, citations: d.entries as Citation[] }))
@@ -270,13 +314,22 @@ export default function ChatPage() {
               )}
 
               {!t.streaming && t.text && (
-                <CorrectionFlow
-                  turn={t}
-                  question={turns[i - 1]?.text ?? ''}
-                  onSent={() =>
-                    setTurns((all) => all.map((x, j) => (j === i ? { ...x, corrected: true } : x)))
-                  }
-                />
+                <div className="flex flex-wrap items-center gap-3 pl-1">
+                  <SpeakButton text={displayText(t.text)} />
+                  <FeedbackButtons
+                    turn={t}
+                    onSet={(verdict) =>
+                      setTurns((all) => all.map((x, j) => (j === i ? { ...x, feedback: verdict } : x)))
+                    }
+                  />
+                  <CorrectionFlow
+                    turn={t}
+                    question={turns[i - 1]?.text ?? ''}
+                    onSent={() =>
+                      setTurns((all) => all.map((x, j) => (j === i ? { ...x, corrected: true } : x)))
+                    }
+                  />
+                </div>
               )}
             </div>
           ),
@@ -297,6 +350,7 @@ export default function ChatPage() {
           placeholder={callMode ? 'Quick — what do they need?' : 'Ask the brain…'}
           className="field min-h-12 flex-1 px-4 text-[15px]"
         />
+        <MicButton big onText={(t) => setInput((prev) => (prev ? `${prev} ${t}` : t))} />
         <button
           type="submit"
           disabled={busy || !input.trim()}
