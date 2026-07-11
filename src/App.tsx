@@ -6,6 +6,7 @@ export default function App() {
 
   const tabs = [
     { to: '/chat', label: 'Ask' },
+    { to: '/call', label: 'Call' },
     { to: '/draft', label: 'Draft' },
     ...(profile?.role === 'admin'
       ? [

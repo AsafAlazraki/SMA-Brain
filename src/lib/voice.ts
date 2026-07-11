@@ -7,7 +7,33 @@ import { getAccessToken } from './supabase'
 
 export type Recorder = { stop: () => Promise<Blob>; cancel: () => void; mimeType: string }
 
-export async function startRecording(): Promise<Recorder> {
+/** Shared AudioContext — created lazily inside a user gesture. */
+let audioCtx: AudioContext | null = null
+function ctx(): AudioContext {
+  audioCtx ??= new AudioContext()
+  if (audioCtx.state === 'suspended') void audioCtx.resume()
+  return audioCtx
+}
+
+/** rAF loop reporting 0..1 RMS level from an analyser until stopped. */
+function meter(analyser: AnalyserNode, onLevel: (level: number) => void): () => void {
+  const data = new Uint8Array(analyser.fftSize)
+  let raf = 0
+  const tick = () => {
+    analyser.getByteTimeDomainData(data)
+    let sum = 0
+    for (let i = 0; i < data.length; i++) {
+      const v = (data[i]! - 128) / 128
+      sum += v * v
+    }
+    onLevel(Math.min(1, Math.sqrt(sum / data.length) * 3.2))
+    raf = requestAnimationFrame(tick)
+  }
+  raf = requestAnimationFrame(tick)
+  return () => cancelAnimationFrame(raf)
+}
+
+export async function startRecording(onLevel?: (level: number) => void): Promise<Recorder> {
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
   const mimeType =
     ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find((t) => MediaRecorder.isTypeSupported(t)) ?? ''
@@ -18,7 +44,18 @@ export async function startRecording(): Promise<Recorder> {
   }
   rec.start(250)
 
-  const cleanup = () => stream.getTracks().forEach((t) => t.stop())
+  let stopMeter: (() => void) | null = null
+  if (onLevel) {
+    const analyser = ctx().createAnalyser()
+    analyser.fftSize = 512
+    ctx().createMediaStreamSource(stream).connect(analyser) // analysis only — not routed to speakers
+    stopMeter = meter(analyser, onLevel)
+  }
+
+  const cleanup = () => {
+    stopMeter?.()
+    stream.getTracks().forEach((t) => t.stop())
+  }
   return {
     mimeType: rec.mimeType || 'audio/webm',
     stop: () =>
@@ -56,8 +93,14 @@ export async function transcribeBlob(blob: Blob): Promise<string> {
 
 let currentAudio: HTMLAudioElement | null = null
 
-/** Speak text out loud (brain's voice). Returns a stop function. */
-export async function speak(text: string): Promise<{ stop: () => void; done: Promise<void> }> {
+/**
+ * Speak text out loud (brain's voice). Returns a stop function.
+ * onLevel (optional) receives 0..1 speech amplitude — drives the persona's lips.
+ */
+export async function speak(
+  text: string,
+  onLevel?: (level: number) => void,
+): Promise<{ stop: () => void; done: Promise<void> }> {
   const token = await getAccessToken()
   const res = await fetch('/api/voice/tts', {
     method: 'POST',
@@ -72,13 +115,30 @@ export async function speak(text: string): Promise<{ stop: () => void; done: Pro
   currentAudio?.pause()
   const audio = new Audio(url)
   currentAudio = audio
+
+  let stopMeter: (() => void) | null = null
+  if (onLevel) {
+    // route through the shared context so the analyser hears the playback
+    const source = ctx().createMediaElementSource(audio)
+    const analyser = ctx().createAnalyser()
+    analyser.fftSize = 512
+    source.connect(analyser)
+    analyser.connect(ctx().destination)
+    stopMeter = meter(analyser, onLevel)
+  }
+
+  const finish = () => {
+    stopMeter?.()
+    onLevel?.(0)
+    URL.revokeObjectURL(url)
+  }
   const done = new Promise<void>((resolve) => {
     audio.onended = () => {
-      URL.revokeObjectURL(url)
+      finish()
       resolve()
     }
     audio.onerror = () => {
-      URL.revokeObjectURL(url)
+      finish()
       resolve()
     }
   })
@@ -86,7 +146,7 @@ export async function speak(text: string): Promise<{ stop: () => void; done: Pro
   return {
     stop: () => {
       audio.pause()
-      URL.revokeObjectURL(url)
+      finish()
     },
     done,
   }
