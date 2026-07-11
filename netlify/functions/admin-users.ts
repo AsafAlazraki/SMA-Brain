@@ -83,6 +83,14 @@ async function createUser(req: Request): Promise<Response> {
   })
   if (error) return jsonResponse(400, { error: error.message })
 
+  // GoTrue merges app_metadata AFTER the row insert, so the 0002 trigger can't see the
+  // role and defaults to staff. The explicit set below is authoritative for invites.
+  const { error: roleError } = await serviceClient()
+    .from('profiles')
+    .update({ role, display_name: displayName })
+    .eq('user_id', data.user.id)
+  if (roleError) return jsonResponse(500, { error: `Account created but role assignment failed: ${roleError.message}` })
+
   return jsonResponse(201, {
     user: { id: data.user.id, email: data.user.email ?? email, role, displayName, createdAt: data.user.created_at ?? null },
   })

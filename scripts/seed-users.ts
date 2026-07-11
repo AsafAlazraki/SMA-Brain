@@ -59,6 +59,17 @@ async function main() {
       process.exitCode = 1
       continue
     }
+    // GoTrue merges app_metadata after the insert, so the trigger defaults the profile
+    // to staff — set the role explicitly (same as /api/admin/users does).
+    const { error: roleError } = await db
+      .from('profiles')
+      .update({ role: account.role, display_name: account.displayName })
+      .eq('user_id', data.user.id)
+    if (roleError) {
+      console.error(`! ${account.email}: profile role assignment failed: ${roleError.message}`)
+      process.exitCode = 1
+      continue
+    }
     const { data: profile } = await db.from('profiles').select('role').eq('user_id', data.user.id).maybeSingle()
     console.log(`✓ ${account.email} created (${account.role}; profile role: ${profile?.role ?? 'MISSING — check 0002 trigger'})`)
   }

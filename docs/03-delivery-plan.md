@@ -5,11 +5,12 @@ Sessions assume the docs pack is in the repo. Order matters; a session may span 
 one sitting but never merges without its criteria green. Update the checkboxes as you go.
 
 ## Prerequisites (humans, before S0)
-- [ ] GitHub repo created (private) — `tonys-brain`
-- [ ] Supabase project (region: Sydney `ap-southeast-2`) + keys — **and disable Auth → Sign up
-      in the dashboard** (invite-only lives in config.toml locally; hosted needs the toggle)
-- [ ] Netlify site linked to repo + env vars set
-- [ ] Anthropic API key (SMA-owned billing) — env `ANTHROPIC_API_KEY`, models pinned in env
+- [x] GitHub repo created — github.com/AsafAlazraki/SMA-Brain (2026-07-11)
+- [x] Supabase project `tonys-brain` (ref `pnnyogbvnusontyyucks`, Sydney `ap-southeast-2`,
+      SMA org) — signup disabled via Management API (invite-only enforced hosted + local)
+- [x] Netlify site `sma-tonys-brain` (AA AI team) — manual CLI deploys for now (no Git
+      integration yet); env vars set (Supabase keys, `ANTHROPIC_API_KEY` secret, model pins)
+- [x] Anthropic API key set — models pinned via env: `claude-fable-5` / `claude-haiku-4-5`
 - [ ] Voice vendor keys (per `05-voice-architecture.md` final rec) — can trail until S8
 - [ ] Decision: catalog via scrape or backend export (ask Tony re site platform access)
 
@@ -28,9 +29,15 @@ Progress (2026-07-10):
 - [x] Role-aware routing: Admin tab/route only for admins (`RequireAuth`/`RequireAdmin` guards)
 - [x] Shared auth middleware on all `/api/*` functions (`netlify/functions/lib/auth.ts`); mock mode still key-free
 - [x] Tests written: middleware units (green) + RLS fixtures & endpoint-guard integration suites
-- [ ] **Acceptance run pending local Supabase** — blocked on machine: WSL2 not installed (Docker Desktop
-      needs it on Windows Home). After `wsl --install` + reboot: `npx supabase start` → fill `.env` →
-      `npm run seed && npm run seed:users` → `npm test` (integration suites un-skip) → login smoke.
+- [x] **Acceptance demonstrated in production (2026-07-11)** — https://sma-tonys-brain.netlify.app:
+      Tony (admin) + staff log in; staff sees no Admin nav and /admin bounces; /api/admin/users
+      serves admins only; chat streams real grounded answers (Fable 5 + hosted retrieval).
+      Found & fixed live: GoTrue merges app_metadata AFTER insert, so the 0002 trigger can't
+      read the role — invite paths (seed script + /api/admin/users) now set profiles.role
+      explicitly post-create; tests mirror that.
+- [ ] RLS test-suite run still needs the LOCAL stack (suites refuse non-localhost by design):
+      WSL2 not installed (Docker Desktop needs it on Windows Home). After `wsl --install` +
+      reboot: `npx supabase start` → point `.env` at local → `npm test` (16 tests un-skip).
 
 ## S2 — Ingestion: catalog + seed knowledge
 `scripts/ingest-catalog.ts`: scrape sewingmachinesaustralia.com.au (Joomla/VirtueMart; polite rate limits, resumable, idempotent upserts by URL/SKU) → `products`; auto-generate product knowledge cards where description carries advice. `scripts/seed-knowledge.ts`: chunk `docs/knowledge/*.md` into atomic cards (fast model assisted), tag + set visibility (industry generics → public-safe; SMA policies → internal until Tony flips), status `approved`, source `seed`. `scripts/build-vocab.ts`: emit STT vocab JSON (brands/models/systems) from products + curated trade terms.

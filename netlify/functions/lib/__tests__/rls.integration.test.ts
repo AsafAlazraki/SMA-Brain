@@ -37,6 +37,13 @@ describe.skipIf(!configured)('RLS policies (staff vs admin fixtures, local Supab
     })
     if (error) throw new Error(`createUser(${name}): ${error.message}`)
     createdUserIds.push(data.user.id)
+    // GoTrue merges app_metadata after the insert, so the 0002 trigger defaults the
+    // profile to staff — production invite paths set the role explicitly; mirror that.
+    const { error: roleError } = await service
+      .from('profiles')
+      .update({ role, display_name: name })
+      .eq('user_id', data.user.id)
+    if (roleError) throw new Error(`set role(${name}): ${roleError.message}`)
     const client = createClient(url, anonKey, { auth: { persistSession: false } })
     const { error: signInError } = await client.auth.signInWithPassword({ email, password })
     if (signInError) throw new Error(`signIn(${name}): ${signInError.message}`)
@@ -62,7 +69,9 @@ describe.skipIf(!configured)('RLS policies (staff vs admin fixtures, local Supab
     }
   }, 30_000)
 
-  it('0002 trigger auto-creates profiles with the role from app_metadata', async () => {
+  it('0002 trigger auto-creates a profile row; explicit role set (the invite path) sticks', async () => {
+    // the trigger guarantees the row exists (default staff — GoTrue merges app_metadata
+    // post-insert); the explicit update in makeUser mirrors /api/admin/users
     const { data: adminProfile } = await service.from('profiles').select('role, display_name').eq('user_id', admin.id).single()
     expect(adminProfile).toMatchObject({ role: 'admin', display_name: 'admin' })
     const { data: staffProfile } = await service.from('profiles').select('role').eq('user_id', staff1.id).single()

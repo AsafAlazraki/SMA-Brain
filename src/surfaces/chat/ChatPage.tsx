@@ -25,6 +25,11 @@ type Turn = {
   gap?: string | null
 }
 
+/** Interim: hide the model's <cited> block from display (S4 parses it server-side). */
+function displayText(text: string): string {
+  return text.replace(/<cited>[\s\S]*?(<\/cited>|$)/g, '').trimEnd()
+}
+
 const SUGGESTIONS = [
   'Customer sews shade sails — what machine do we recommend?',
   'What needle system does the LU-2810 take?',
@@ -113,7 +118,7 @@ export default function ChatPage() {
             <div key={i} className="max-w-[95%] space-y-2">
               {t.toolStatus && <div className="text-xs italic text-slate-500">⚙ {t.toolStatus}</div>}
               <div className={`whitespace-pre-wrap rounded-2xl rounded-bl-sm bg-slate-900 px-4 py-2.5 text-sm leading-relaxed text-slate-200 ${t.streaming ? 'caret' : ''}`}>
-                {t.text}
+                {displayText(t.text)}
               </div>
               {t.products?.map((p) => (
                 <a

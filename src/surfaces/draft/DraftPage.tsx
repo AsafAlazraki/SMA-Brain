@@ -26,6 +26,8 @@ export default function DraftPage() {
           if (event === 'meta') setDraftId(String(d.draftId ?? '') || null)
           if (event === 'mined') setMined((d.questions as string[]) ?? [])
           if (event === 'token') setDraft((prev) => prev + String(d.text ?? ''))
+          // interim: scrub the model's <cited> block from the copyable draft (S4 moves this server-side)
+          if (event === 'done') setDraft((prev) => prev.replace(/<cited>[\s\S]*?(<\/cited>|$)/g, '').trimEnd())
         },
         { token },
       )
