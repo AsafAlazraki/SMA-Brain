@@ -73,7 +73,10 @@ export function PortraitAvatar({
     return () => cancelAnimationFrame(raf)
   }, [levelRef])
 
-  const region = (box: { x: number; y: number; w: number; h: number }, image: string): React.CSSProperties => ({
+  const region = (
+    box: { x: number; y: number; w: number; h: number; dx?: number; dy?: number },
+    image: string,
+  ): React.CSSProperties => ({
     position: 'absolute',
     left: `${box.x}%`,
     top: `${box.y}%`,
@@ -81,7 +84,7 @@ export function PortraitAvatar({
     height: `${box.h}%`,
     backgroundImage: `url(${image})`,
     backgroundSize: `${10000 / box.w}% ${10000 / box.h}%`,
-    backgroundPosition: `${(box.x / (100 - box.w)) * 100}% ${(box.y / (100 - box.h)) * 100}%`,
+    backgroundPosition: `${((box.x - (box.dx ?? 0)) / (100 - box.w)) * 100}% ${((box.y - (box.dy ?? 0)) / (100 - box.h)) * 100}%`,
     opacity: 0,
     // soft-edged mask so the crossfade region blends into the base portrait
     WebkitMaskImage: 'radial-gradient(ellipse 50% 50% at 50% 50%, black 55%, transparent 78%)',

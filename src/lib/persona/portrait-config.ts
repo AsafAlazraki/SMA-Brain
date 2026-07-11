@@ -11,8 +11,8 @@ export const PORTRAIT = {
   base: '/persona/neutral.png',
   eyesClosed: '/persona/eyes-closed.png',
   mouthOpen: '/persona/mouth-open.png',
-  /** eye band: x, y, w, h in % of the image */
-  eyes: { x: 22, y: 34, w: 56, h: 14 },
-  /** mouth region */
-  mouth: { x: 34, y: 58, w: 32, h: 16 },
+  /** eye band (incl. brows): x, y, w, h in % of the image; dx/dy nudge the variant texture */
+  eyes: { x: 30, y: 20, w: 40, h: 19, dx: 0, dy: 0 },
+  /** mouth region (incl. chin shift on the "ah") */
+  mouth: { x: 39, y: 37, w: 23, h: 19, dx: 0, dy: 0 },
 } as const
