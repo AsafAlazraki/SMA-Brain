@@ -195,11 +195,18 @@ export default function ChatPage() {
         return copy
       })
 
+    // prior turns from what's on screen — server-side memory can't rely on a DB
+    // write landing inside the 10s streaming cap
+    const priorHistory = turns
+      .filter((t) => t.text.trim())
+      .slice(-8)
+      .map((t) => ({ role: t.role, content: displayText(t.text) }))
+
     try {
       const token = await getAccessToken()
       await streamSSE(
         '/api/chat',
-        { conversationId: conversationId.current, message: question, mode: callMode ? 'call' : 'chat' },
+        { conversationId: conversationId.current, message: question, mode: callMode ? 'call' : 'chat', history: priorHistory },
         ({ event, data }) => {
           const d = data as Record<string, unknown>
           if (event === 'meta') {

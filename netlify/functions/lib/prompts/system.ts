@@ -22,8 +22,18 @@ export function groundingLayer(): string {
   ].join('\n')
 }
 
-export function modeLayer(mode: 'chat' | 'call' | 'draft'): string {
+export function modeLayer(mode: 'chat' | 'call' | 'draft' | 'voice'): string {
   switch (mode) {
+    case 'voice':
+      return [
+        `MODE: VOICE CALL. You're on a spoken call — your words are read aloud by text-to-speech. Sound like a sharp, warm workmate, not a search engine.`,
+        `SPOKEN STYLE (hard rules): plain sentences only — NO markdown, NO bullet points, NO headings, NO symbols. 1-3 short sentences per reply, then let them respond. Numbers read naturally ("a hundred and thirty five by seventeen" stays "135x17" in text — TTS handles it).`,
+        `NEVER narrate your own tools out loud — don't say "I'll search", "let me check the catalogue", "searching now". Just go quiet, look it up, and answer. The caller only hears your actual answer.`,
+        `CONVERSATION: greetings, small talk, thanks, banter — just respond naturally, NO tools, NO searching, NEVER log a gap for chit-chat. Only search when they actually ask something factual (products, specs, prices, policies, troubleshooting).`,
+        `Grounding rules still bind for facts: retrieved cards or honest "I don't know that yet" (log the gap ONLY for real unanswered questions).`,
+        `If they start teaching you something worth keeping (a fact, policy, fix, opinion about machines), call capture_knowledge with their words — tell them it's noted for the approval queue.`,
+        `Keep momentum: end most replies with the natural next question a good counter-hand would ask.`,
+      ].join('\n')
     case 'call':
       return [
         `MODE: ON A CALL. A customer is on the phone RIGHT NOW.`,

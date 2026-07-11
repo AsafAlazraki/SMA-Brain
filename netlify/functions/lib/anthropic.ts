@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { env, isMockLLM } from './env'
 import { searchKnowledge, searchProducts, logGap, type ProductHit } from './retrieval'
+import { distillToCards, queueProposals } from './learning'
 import { MOCK_ANSWER_NOTE } from './mock'
 
 const TOOLS: Anthropic.Tool[] = [
@@ -45,6 +46,18 @@ const TOOLS: Anthropic.Tool[] = [
   },
 ]
 
+/** Admin-only extra tool: the caller teaches something → distil → approval queue. */
+const CAPTURE_TOOL: Anthropic.Tool = {
+  name: 'capture_knowledge',
+  description:
+    "The caller (Tony/admin) just taught you something worth keeping — a fact, policy, fault fix, or opinion. Pass their teaching verbatim; it gets written up into knowledge cards for the approval queue. Use for real knowledge only, never for questions or chit-chat.",
+  input_schema: {
+    type: 'object' as const,
+    properties: { teaching: { type: 'string', description: "The caller's teaching, verbatim or near-verbatim" } },
+    required: ['teaching'],
+  },
+}
+
 export type Citation = { id: string; title: string }
 
 export type AgentEvents = {
@@ -62,13 +75,19 @@ export async function runAgent(opts: {
   maxToolRounds?: number
   /** Latency lever: 'low' for on-a-call turns, 'medium' default. Fable 5 at low effort still answers well. */
   effort?: 'low' | 'medium' | 'high'
+  /** Admin callers get capture_knowledge (teach → approval queue). Set to the user id. */
+  captureAsUser?: string | null
+  /** 'fast' runs the ANTHROPIC_MODEL_FAST tier — voice turns need snappy over deep (docs/05 latency budget). */
+  tier?: 'main' | 'fast'
   events: AgentEvents
 }): Promise<{ text: string }> {
   if (isMockLLM) return runMockAgent(opts)
 
   const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY })
-  const model = env.ANTHROPIC_MODEL
+  const model = (opts.tier === 'fast' ? env.ANTHROPIC_MODEL_FAST : '') || env.ANTHROPIC_MODEL
   if (!model) throw new Error('ANTHROPIC_MODEL env var not set')
+  // effort is an Opus/Fable-tier control; Haiku (fast tier) 400s on it
+  const supportsEffort = /fable|opus|sonnet/i.test(model)
 
   const messages = [...opts.messages]
   let fullText = ''
@@ -76,15 +95,17 @@ export async function runAgent(opts: {
   const productsSeen = new Map<string, ProductHit>()
   const maxRounds = opts.maxToolRounds ?? 4
 
+  const tools = opts.captureAsUser !== undefined && opts.captureAsUser !== null ? [...TOOLS, CAPTURE_TOOL] : TOOLS
+
   for (let round = 0; round <= maxRounds; round++) {
     // last round: no more tools — the model must answer with what it has
     const finalRound = round === maxRounds
     const stream = client.messages.stream({
       model,
       max_tokens: 1500,
-      output_config: { effort: opts.effort ?? 'medium' },
+      ...(supportsEffort ? { output_config: { effort: opts.effort ?? 'medium' } } : {}),
       system: [{ type: 'text', text: opts.system, cache_control: { type: 'ephemeral' } }],
-      tools: TOOLS,
+      tools,
       ...(finalRound ? { tool_choice: { type: 'none' as const } } : {}),
       messages,
     })
@@ -124,6 +145,10 @@ export async function runAgent(opts: {
           await logGap(input.question ?? '')
           opts.events.onGap(input.question ?? '')
           resultPayload = { logged: true }
+        } else if (tu.name === 'capture_knowledge' && opts.captureAsUser) {
+          const cards = await distillToCards(input.teaching ?? '', 'blurt')
+          const queued = await queueProposals(cards, 'blurt', opts.captureAsUser, { kind: 'voice_call' })
+          resultPayload = { queued }
         } else {
           resultPayload = { error: `unknown tool ${tu.name}` }
         }

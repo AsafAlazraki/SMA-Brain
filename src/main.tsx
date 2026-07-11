@@ -10,7 +10,6 @@ import ChatPage from './surfaces/chat/ChatPage'
 import DraftPage from './surfaces/draft/DraftPage'
 import AdminPage from './surfaces/admin/AdminPage'
 import TeachPage from './surfaces/teach/TeachPage'
-import CallPage from './surfaces/call/CallPage'
 import './index.css'
 
 const queryClient = new QueryClient()
@@ -26,7 +25,6 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
               <Route element={<App />}>
                 <Route index element={<Navigate to="/chat" replace />} />
                 <Route path="/chat" element={<ChatPage />} />
-                <Route path="/call" element={<CallPage />} />
                 <Route path="/draft" element={<DraftPage />} />
                 <Route element={<RequireAdmin />}>
                   <Route path="/admin" element={<AdminPage />} />

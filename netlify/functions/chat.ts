@@ -11,7 +11,12 @@ export default async function handler(req: Request): Promise<Response> {
   if (auth.failure) return auth.failure
   const user = auth.user
 
-  let body: { conversationId?: string | null; message?: string; mode?: 'chat' | 'call' }
+  let body: {
+    conversationId?: string | null
+    message?: string
+    mode?: 'chat' | 'call' | 'voice'
+    history?: { role: 'user' | 'assistant'; content: string }[]
+  }
   try {
     body = await req.json()
   } catch {
@@ -19,7 +24,13 @@ export default async function handler(req: Request): Promise<Response> {
   }
   const message = (body.message ?? '').trim()
   if (!message) return jsonResponse(400, { error: 'message required' })
-  const mode = body.mode === 'call' ? 'call' : 'chat'
+  const mode = body.mode === 'call' || body.mode === 'voice' ? body.mode : 'chat'
+  // client sends recent turns so memory doesn't depend on a DB write finishing
+  // inside the 10s streaming cap; trimmed + capped server-side
+  const clientHistory = (body.history ?? [])
+    .filter((t) => (t.role === 'user' || t.role === 'assistant') && typeof t.content === 'string' && t.content.trim())
+    .slice(-8)
+    .map((t) => ({ role: t.role, content: t.content.slice(0, 4000) }))
 
   const sse = createSSE()
   const isNewConversation = !body.conversationId
@@ -36,9 +47,12 @@ export default async function handler(req: Request): Promise<Response> {
     try {
       const { text } = await runAgent({
         system: [identityLayer(), groundingLayer(), modeLayer(mode)].join('\n\n'),
-        messages: [{ role: 'user', content: message }],
-        maxToolRounds: mode === 'call' ? 2 : 3,
-        effort: mode === 'call' ? 'low' : 'medium',
+        messages: [...clientHistory, { role: 'user', content: message }],
+        maxToolRounds: mode === 'chat' ? 3 : 2,
+        effort: mode === 'chat' ? 'medium' : 'low',
+        tier: mode === 'voice' ? 'fast' : 'main', // spoken turns: snappy beats deep (docs/05)
+        // teaching from the call goes to the approval queue — admins only
+        captureAsUser: mode === 'voice' && user.role === 'admin' && user.id !== MOCK_USER.id ? user.id : undefined,
         events: {
           onToken: (t) => sse.send('token', { text: t }),
           onTool: (name, status, summary) => sse.send('tool', { name, status, summary }),
@@ -53,8 +67,9 @@ export default async function handler(req: Request): Promise<Response> {
           },
         },
       })
-      await persistTurn({ conversationId, isNewConversation, messageId, userId: user.id, question: message, answer: text, citations, productIds })
       sse.send('done', { ms: Date.now() - started })
+      // record for thumbs/usage — best effort, after 'done' so it never delays the answer
+      await persistTurn({ conversationId, isNewConversation, messageId, userId: user.id, question: message, answer: text, citations, productIds })
     } catch (err) {
       sse.send('error', { message: String(err) })
     } finally {
@@ -94,8 +109,10 @@ async function persistTurn(args: {
     const cleanAnswer = args.answer.replace(/<cited>[\s\S]*?(<\/cited>|$)/g, '').trimEnd()
     // valid uuids only — mock corpus ids like "k-shade-sails" would fail the uuid[] columns
     const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    // BOTH rows need an explicit id: PostgREST array-insert unions keys, so a row
+    // missing `id` gets null (not the column default) and fails not-null.
     await db.from('messages').insert([
-      { conversation_id: args.conversationId, role: 'user', content: args.question },
+      { id: crypto.randomUUID(), conversation_id: args.conversationId, role: 'user', content: args.question },
       {
         id: args.messageId,
         conversation_id: args.conversationId,

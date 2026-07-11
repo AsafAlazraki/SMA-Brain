@@ -105,32 +105,31 @@ export async function transcribeBlob(blob: Blob): Promise<string> {
 
 let currentAudio: HTMLAudioElement | null = null
 
-/**
- * Speak text out loud (brain's voice). Returns a stop function.
- * onLevel (optional) receives 0..1 speech amplitude — drives the persona's lips.
- */
-export async function speak(
-  text: string,
-  onLevel?: (level: number) => void,
-): Promise<{ stop: () => void; done: Promise<void> }> {
-  const token = await getAccessToken()
-  const res = await fetch('/api/voice/tts', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-    body: JSON.stringify({ text }),
-  })
-  if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as { error?: string } | null
-    throw new Error(body?.error ?? `Voice failed (${res.status})`)
+/** Fetch synthesized speech for a chunk of text. Returns null on failure. */
+async function fetchSpeech(text: string): Promise<Blob | null> {
+  try {
+    const token = await getAccessToken()
+    const res = await fetch('/api/voice/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify({ text }),
+    })
+    if (!res.ok) return null
+    return await res.blob()
+  } catch {
+    return null
   }
-  const url = URL.createObjectURL(await res.blob())
+}
+
+/** Play one audio blob with optional lip-sync metering. */
+function playBlob(blob: Blob, onLevel?: (level: number) => void): { stop: () => void; done: Promise<void> } {
+  const url = URL.createObjectURL(blob)
   currentAudio?.pause()
   const audio = new Audio(url)
   currentAudio = audio
 
   let stopMeter: (() => void) | null = null
   if (onLevel) {
-    // route through the shared context so the analyser hears the playback
     const source = ctx().createMediaElementSource(audio)
     const analyser = ctx().createAnalyser()
     analyser.fftSize = 512
@@ -154,12 +153,133 @@ export async function speak(
       resolve()
     }
   })
-  await audio.play()
+  void audio.play().catch(() => {
+    finish()
+  })
   return {
     stop: () => {
       audio.pause()
       finish()
     },
     done,
+  }
+}
+
+/**
+ * Speak text out loud (brain's voice). Returns a stop function.
+ * onLevel (optional) receives 0..1 speech amplitude — drives the persona's lips.
+ */
+export async function speak(
+  text: string,
+  onLevel?: (level: number) => void,
+): Promise<{ stop: () => void; done: Promise<void> }> {
+  const blob = await fetchSpeech(text)
+  if (!blob) throw new Error('Voice unavailable')
+  return playBlob(blob, onLevel)
+}
+
+/**
+ * Sentence-streamed speech: feed streamed answer text in as it arrives; each
+ * completed sentence is synthesized immediately (max 2 in flight — free-plan
+ * concurrency) and played in order, so she starts talking on sentence one
+ * while the rest is still being written.
+ */
+export function createSpeechStream(handlers: {
+  onLevel?: (level: number) => void
+  onStart?: () => void
+  onEnd?: () => void
+}): { addText: (delta: string) => void; finish: () => void; stop: () => void } {
+  let buffer = ''
+  let stopped = false
+  let started = false
+  let finished = false
+  const fetchQueue: Promise<Blob | null>[] = []
+  let inFlight = 0
+  const backlog: string[] = []
+  let playChain = Promise.resolve()
+  let currentStop: (() => void) | null = null
+  let queuedCount = 0
+  let playedCount = 0
+
+  const maybeEnd = () => {
+    if (finished && backlog.length === 0 && inFlight === 0 && playedCount === queuedCount && !stopped) {
+      handlers.onEnd?.()
+    }
+  }
+
+  const pump = () => {
+    while (!stopped && inFlight < 2 && backlog.length > 0) {
+      const sentence = backlog.shift()!
+      inFlight++
+      queuedCount++
+      const p = fetchSpeech(sentence).then((blob) => {
+        inFlight--
+        pump()
+        return blob
+      })
+      fetchQueue.push(p)
+      playChain = playChain.then(async () => {
+        const blob = await p
+        if (stopped || !blob) {
+          playedCount++
+          maybeEnd()
+          return
+        }
+        if (!started) {
+          started = true
+          handlers.onStart?.()
+        }
+        const { stop, done } = playBlob(blob, handlers.onLevel)
+        currentStop = stop
+        await done
+        currentStop = null
+        playedCount++
+        maybeEnd()
+      })
+    }
+  }
+
+  const enqueue = (sentence: string) => {
+    const clean = sentence.trim()
+    if (clean.length < 2) return
+    backlog.push(clean)
+    pump()
+  }
+
+  const drainBuffer = (flushAll: boolean) => {
+    // split on sentence enders; hold short fragments back for merging
+    for (;;) {
+      const m = /[.!?…]+["')\]]?\s/.exec(buffer)
+      if (!m) break
+      const end = m.index + m[0].length
+      const candidate = buffer.slice(0, end)
+      if (candidate.trim().length < 24 && buffer.length < 160 && !flushAll) break
+      enqueue(candidate)
+      buffer = buffer.slice(end)
+    }
+    if (flushAll && buffer.trim()) {
+      enqueue(buffer)
+      buffer = ''
+    }
+  }
+
+  return {
+    addText(delta) {
+      if (stopped) return
+      buffer += delta
+      drainBuffer(false)
+    },
+    finish() {
+      if (stopped || finished) return
+      drainBuffer(true)
+      finished = true
+      maybeEnd()
+    },
+    stop() {
+      stopped = true
+      backlog.length = 0
+      currentStop?.()
+      handlers.onLevel?.(0)
+    },
   }
 }

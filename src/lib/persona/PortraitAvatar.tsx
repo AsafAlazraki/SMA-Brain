@@ -28,7 +28,8 @@ export function PortraitAvatar({
     let raf = 0
     let nextBlink = performance.now() + 1800
     let blinkStart = 0
-    let open = 0
+    let mouthOpen = false
+    let mouthChangedAt = 0
 
     const tick = (now: number) => {
       const t = now / 1000
@@ -56,9 +57,22 @@ export function PortraitAvatar({
       }
       if (eyesRef.current) eyesRef.current.style.opacity = lidsDown ? '1' : '0'
 
-      const target = s === 'speaking' ? Math.min(1, level * 2.1) : 0
-      open += (target - open) * 0.45
-      if (mouthRef.current) mouthRef.current.style.opacity = String(Math.max(0, Math.min(1, open)))
+      // mouth: 2-frame flap with hysteresis + minimum hold — crossfading
+      // between non-identical variants at 60fps strobes and looks unhinged
+      if (s === 'speaking') {
+        if (mouthOpen) {
+          if (level < 0.09 && now - mouthChangedAt > 90) {
+            mouthOpen = false
+            mouthChangedAt = now
+          }
+        } else if (level > 0.2 && now - mouthChangedAt > 70) {
+          mouthOpen = true
+          mouthChangedAt = now
+        }
+      } else {
+        mouthOpen = false
+      }
+      if (mouthRef.current) mouthRef.current.style.opacity = mouthOpen ? '1' : '0'
 
       if (ringRef.current) {
         if (s === 'listening') {

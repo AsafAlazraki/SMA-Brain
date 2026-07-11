@@ -1,17 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
-import { streamSSE } from '../../lib/sse'
-import { getAccessToken } from '../../lib/supabase'
-import { startRecording, transcribeBlob, createSpeechStream, stripForSpeech, type Recorder } from '../../lib/voice'
-import { Persona, type PersonaState } from '../../lib/persona/Persona'
+import { streamSSE } from '../sse'
+import { getAccessToken } from '../supabase'
+import { startRecording, transcribeBlob, createSpeechStream, stripForSpeech, type Recorder } from '../voice'
+import { Persona, type PersonaState } from '../persona/Persona'
 
 /**
- * The call — a running conversation, not a walkie-talkie. Tap once to start:
- * she listens (silence ends your turn automatically), starts speaking on her
- * first sentence while the rest is still composing, then listens again.
- * Tap while she talks to interrupt. Admins teaching her mid-call get their
- * words distilled straight into the approval queue (capture_knowledge).
+ * The call — a running conversation, not a walkie-talkie. Tap once to start;
+ * she listens (silence ends your turn), starts talking on her first sentence
+ * while the rest composes, then listens again — hands-free back-and-forth.
+ * Rendered as a full-screen overlay from anywhere in the app (CallProvider).
  */
-export default function CallPage() {
+export function CallExperience({ onClose }: { onClose: () => void }) {
   const [state, setState] = useState<PersonaState>('idle')
   const [onCall, setOnCall] = useState(false)
   const [heard, setHeard] = useState<string | null>(null)
@@ -21,11 +20,11 @@ export default function CallPage() {
   const recorder = useRef<Recorder | null>(null)
   const speech = useRef<ReturnType<typeof createSpeechStream> | null>(null)
   const conversationId = useRef<string | null>(null)
+  const history = useRef<{ role: 'user' | 'assistant'; content: string }[]>([])
   const stateRef = useRef(state)
   stateRef.current = state
   const onCallRef = useRef(onCall)
   onCallRef.current = onCall
-  // VAD bookkeeping
   const vad = useRef({ heardSpeech: false, lastVoiceAt: 0, startedAt: 0 })
 
   useEffect(() => {
@@ -50,17 +49,13 @@ export default function CallPage() {
         }
         if (stateRef.current !== 'listening') return
         const silentFor = now - Math.max(v.lastVoiceAt, v.startedAt)
-        if (
-          (v.heardSpeech && silentFor > 1400) || // they finished talking
-          (!v.heardSpeech && now - v.startedAt > 9000) || // nothing said
-          now - v.startedAt > 60_000 // hard cap
-        ) {
+        if ((v.heardSpeech && silentFor > 1400) || (!v.heardSpeech && now - v.startedAt > 9000) || now - v.startedAt > 60_000) {
           void finishListening()
         }
       })
       setState('listening')
     } catch {
-      setNote('Mic blocked — allow microphone access in your browser and try again.')
+      setNote('Mic blocked — allow microphone access and try again.')
       setOnCall(false)
       setState('idle')
     }
@@ -74,7 +69,7 @@ export default function CallPage() {
     recorder.current = null
     if (!vad.current.heardSpeech) {
       rec.cancel()
-      setNote("Didn't hear anything — tap to talk when you're ready.")
+      setNote("Didn't hear anything — tap the mic when you're ready.")
       setOnCall(false)
       setState('idle')
       return
@@ -106,8 +101,7 @@ export default function CallPage() {
       onEnd: () => {
         speech.current = null
         setState('idle')
-        // her turn's over — back to listening while the call is on
-        if (onCallRef.current) setTimeout(() => void startListening(), 300)
+        if (onCallRef.current) setTimeout(() => void startListening(), 250)
       },
     })
     speech.current = stream
@@ -115,7 +109,7 @@ export default function CallPage() {
       const token = await getAccessToken()
       await streamSSE(
         '/api/chat',
-        { conversationId: conversationId.current, message: question, mode: 'voice' },
+        { conversationId: conversationId.current, message: question, mode: 'voice', history: history.current },
         ({ event, data }) => {
           const d = data as Record<string, unknown>
           if (event === 'meta') conversationId.current = String(d.conversationId ?? '') || null
@@ -130,10 +124,17 @@ export default function CallPage() {
         { token },
       )
       stream.finish()
+      const answerText = stripForSpeech(raw)
+      if (answerText) {
+        history.current = [
+          ...history.current,
+          { role: 'user' as const, content: question },
+          { role: 'assistant' as const, content: answerText },
+        ].slice(-8)
+      }
       if (!stripForSpeech(raw)) {
         stream.stop()
         speech.current = null
-        setNote('The brain came back empty — try asking again.')
         setState('idle')
         if (onCallRef.current) void startListening()
       }
@@ -149,7 +150,6 @@ export default function CallPage() {
   function onTalk() {
     setNote(null)
     if (stateRef.current === 'speaking') {
-      // barge-in: hush her and take the floor
       speech.current?.stop()
       speech.current = null
       setState('idle')
@@ -167,32 +167,40 @@ export default function CallPage() {
     }
   }
 
-  function endCall() {
-    setOnCall(false)
-    onCallRef.current = false
+  function hangUp() {
     recorder.current?.cancel()
-    recorder.current = null
     speech.current?.stop()
-    speech.current = null
-    levelRef.current = 0
-    setState('idle')
-    setNote(null)
+    onClose()
   }
 
   const status = !onCall
-    ? 'Tap to start the call'
+    ? 'Tap the mic and just talk'
     : state === 'listening'
-      ? 'Listening — just talk, pause when done'
+      ? 'Listening — pause when you’re done'
       : state === 'thinking'
         ? 'Thinking…'
         : state === 'speaking'
-          ? 'Tap to interrupt'
+          ? 'Tap to jump in'
           : '…'
 
   return (
-    <div className="relative flex h-full flex-col items-center overflow-hidden">
-      <div className="flex min-h-0 w-full flex-1 items-center justify-center px-6 pt-2">
-        <Persona state={state} levelRef={levelRef} className="h-full max-h-[42vh] w-auto max-w-full sm:max-h-[50vh]" />
+    <div className="flex h-full flex-col items-center overflow-hidden">
+      {/* close (X) — always obvious */}
+      <div className="flex w-full items-center justify-between px-4 pt-3">
+        <span className="stamp !text-cloth-500">On a call</span>
+        <button
+          onClick={hangUp}
+          aria-label="Close the call"
+          className="flex min-h-11 min-w-11 items-center justify-center rounded-full text-cloth-400 transition hover:text-cloth-100"
+        >
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden>
+            <path d="M18 6 6 18M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+
+      <div className="flex min-h-0 w-full flex-1 items-center justify-center px-6">
+        <Persona state={state} levelRef={levelRef} className="h-full max-h-[42vh] w-auto max-w-full sm:max-h-[48vh]" />
       </div>
 
       <div className="text-center">
@@ -212,24 +220,21 @@ export default function CallPage() {
 
       <div className="mt-3 min-h-[84px] w-full max-w-xl px-6 text-center">
         {heard && (
-          <p className="stitched mx-auto mb-2 w-fit max-w-full truncate rounded-md bg-steel-800/70 px-3 py-1.5 text-[13px] text-denim-300">
-            “{heard}”
-          </p>
+          <p className="stitched mx-auto mb-2 w-fit max-w-full truncate rounded-md bg-steel-800/70 px-3 py-1.5 text-[13px] text-denim-300">“{heard}”</p>
         )}
         {caption && <p className="mx-auto max-h-24 overflow-y-auto text-[15px] leading-relaxed text-cloth-100">{caption}</p>}
         {note && <p className="text-[13px] text-stop-500">{note}</p>}
       </div>
 
-      <div className="flex items-center justify-center gap-8 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-4">
+      <div className="flex items-center justify-center gap-8 pb-[max(1.75rem,env(safe-area-inset-bottom))] pt-4">
         {onCall && (
           <button
-            onClick={endCall}
-            aria-label="End call"
-            className="flex h-14 w-14 items-center justify-center rounded-full border border-stop-500/60 text-stop-500 transition hover:bg-stop-500/10"
+            onClick={hangUp}
+            aria-label="Hang up"
+            className="flex h-14 w-14 items-center justify-center rounded-full bg-stop-500 text-white transition hover:brightness-110"
           >
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91" />
-              <line x1="22" x2="2" y1="2" y2="22" />
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden style={{ transform: 'rotate(135deg)' }}>
+              <path d="M6.62 10.79c1.44 2.83 3.76 5.15 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2Z" />
             </svg>
           </button>
         )}

@@ -34,9 +34,14 @@ export default async function handler(req: Request): Promise<Response> {
   }
 }
 
+/** Only bother the fast model when the transcript could plausibly contain trade jargon. */
+const JARGON_HINT =
+  /\d|juki|brother|singer|pfaff|adler|siruba|newlong|seiko|highlead|typical|jack\b|zoje|tex\b|overlock|coverstitch|bartack|bobbin|walking foot|needle|thread|\b(one|two|three|four|five|six|seven|eight|nine|ten|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred)\b/i
+
 async function repairJargon(raw: string): Promise<string> {
   const trimmed = raw.trim()
   if (!trimmed || isMockLLM) return trimmed
+  if (!JARGON_HINT.test(trimmed)) return trimmed // "hello, how are ya" — nothing to repair, save the round-trip
   try {
     const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY })
     const model = env.ANTHROPIC_MODEL_FAST || env.ANTHROPIC_MODEL
