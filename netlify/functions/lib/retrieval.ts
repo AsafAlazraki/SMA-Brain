@@ -20,6 +20,21 @@ export type ProductHit = {
 const service = isSupabaseConfigured ? createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY) : null
 
 /**
+ * websearch_to_tsquery ANDs every word, so one noise word ("setup", "which")
+ * zeroes recall. OR-join instead — RRF ranking handles precision, top-k caps
+ * the noise. Keeps -, x, / so "LU-2810", "135x17", "20/125" survive intact.
+ * Interim until S3's query-rewrite + embeddings land.
+ */
+export function orQuery(query: string): string {
+  const words = query
+    .toLowerCase()
+    .replace(/[^a-z0-9\s/x-]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length > 1)
+  return [...new Set(words)].slice(0, 12).join(' OR ')
+}
+
+/**
  * Hybrid search. With Supabase connected this calls the SQL RPCs (FTS + vector + trigram RRF).
  * Embeddings are optional at this stage — the RPCs degrade gracefully to FTS/trigram when
  * query_embedding is a zero vector (S3 wires the real embedding provider).
@@ -27,7 +42,7 @@ const service = isSupabaseConfigured ? createClient(env.SUPABASE_URL, env.SUPABA
 export async function searchKnowledge(query: string, count = 8): Promise<KnowledgeHit[]> {
   if (!service) return mockSearch(MOCK_KNOWLEDGE, query, count) as unknown as KnowledgeHit[]
   const { data, error } = await service.rpc('search_knowledge', {
-    query_text: query,
+    query_text: orQuery(query),
     query_embedding: zeroVector(),
     match_count: count,
   })
@@ -38,7 +53,7 @@ export async function searchKnowledge(query: string, count = 8): Promise<Knowled
 export async function searchProducts(query: string, count = 6): Promise<ProductHit[]> {
   if (!service) return mockSearch(MOCK_PRODUCTS, query, count) as unknown as ProductHit[]
   const { data, error } = await service.rpc('search_products', {
-    query_text: query,
+    query_text: orQuery(query),
     query_embedding: zeroVector(),
     match_count: count,
   })

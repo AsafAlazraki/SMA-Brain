@@ -7,7 +7,12 @@ export default function App() {
   const tabs = [
     { to: '/chat', label: 'Ask' },
     { to: '/draft', label: 'Draft' },
-    ...(profile?.role === 'admin' ? [{ to: '/admin', label: 'Admin' }] : []),
+    ...(profile?.role === 'admin'
+      ? [
+          { to: '/teach', label: 'Teach' },
+          { to: '/admin', label: 'Admin' },
+        ]
+      : []),
   ]
 
   return (

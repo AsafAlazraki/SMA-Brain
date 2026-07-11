@@ -9,6 +9,7 @@ import LoginPage from './surfaces/auth/LoginPage'
 import ChatPage from './surfaces/chat/ChatPage'
 import DraftPage from './surfaces/draft/DraftPage'
 import AdminPage from './surfaces/admin/AdminPage'
+import TeachPage from './surfaces/teach/TeachPage'
 import './index.css'
 
 const queryClient = new QueryClient()
@@ -27,6 +28,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
                 <Route path="/draft" element={<DraftPage />} />
                 <Route element={<RequireAdmin />}>
                   <Route path="/admin" element={<AdminPage />} />
+                  <Route path="/teach" element={<TeachPage />} />
                 </Route>
               </Route>
             </Route>

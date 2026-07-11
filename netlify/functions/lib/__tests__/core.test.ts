@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { encodeSSE } from '../sse'
 import { cleanEmailThread, mineQuestions } from '../../draft'
-import { searchKnowledge, searchProducts } from '../retrieval'
+import { searchKnowledge, searchProducts, orQuery } from '../retrieval'
 import { identityLayer, groundingLayer, modeLayer } from '../prompts/system'
 
 describe('sse encoding', () => {
@@ -40,6 +40,18 @@ describe('mock retrieval (jargon round-trip)', () => {
     expect(k.some((h) => h.id === 'k-shade-sails')).toBe(true)
     const p = await searchProducts('shade sail machine')
     expect(p.some((h) => h.id === 'p-k6-20')).toBe(true)
+  })
+})
+
+describe('FTS query building (jargon round-trip)', () => {
+  it('OR-joins words so noise terms cannot zero recall', () => {
+    expect(orQuery('caravan annexe machine thread setup')).toBe('caravan OR annexe OR machine OR thread OR setup')
+  })
+  it('keeps model numbers, needle systems and sizes intact', () => {
+    const q = orQuery('needle for LU-2810 with 135x17 at 20/125?')
+    expect(q).toContain('lu-2810')
+    expect(q).toContain('135x17')
+    expect(q).toContain('20/125')
   })
 })
 

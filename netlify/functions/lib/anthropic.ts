@@ -77,12 +77,15 @@ export async function runAgent(opts: {
   const maxRounds = opts.maxToolRounds ?? 4
 
   for (let round = 0; round <= maxRounds; round++) {
+    // last round: no more tools — the model must answer with what it has
+    const finalRound = round === maxRounds
     const stream = client.messages.stream({
       model,
       max_tokens: 1500,
       output_config: { effort: opts.effort ?? 'medium' },
       system: [{ type: 'text', text: opts.system, cache_control: { type: 'ephemeral' } }],
       tools: TOOLS,
+      ...(finalRound ? { tool_choice: { type: 'none' as const } } : {}),
       messages,
     })
 

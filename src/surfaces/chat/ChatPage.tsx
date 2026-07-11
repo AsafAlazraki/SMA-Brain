@@ -24,6 +24,7 @@ type Turn = {
   citations?: Citation[]
   products?: ProductCard[]
   gap?: string | null
+  corrected?: boolean
 }
 
 const SUGGESTIONS = [
@@ -36,6 +37,70 @@ const SUGGESTIONS = [
 /** Interim: hide the model's <cited> block from display (S4 parses it server-side). */
 function displayText(text: string): string {
   return text.replace(/<cited>[\s\S]*?(<\/cited>|$)/g, '').trimEnd()
+}
+
+/** Flag a wrong answer → correction goes to Tony's approval queue. */
+function CorrectionFlow({ turn, question, onSent }: { turn: Turn; question: string; onSent: () => void }) {
+  const [open, setOpen] = useState(false)
+  const [text, setText] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  if (turn.corrected) {
+    return <p className="stamp pl-1 !text-go-500">✓ Correction sent to Tony's queue</p>
+  }
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)} className="stamp pl-1 !text-cloth-600 transition hover:!text-safety-400">
+        Wrong? Set it straight
+      </button>
+    )
+  }
+
+  async function submit() {
+    if (!text.trim() || busy) return
+    setBusy(true)
+    setError(null)
+    try {
+      const token = await getAccessToken()
+      const res = await fetch('/api/correct', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ question, answer: displayText(turn.text), correction: text.trim() }),
+      })
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { error?: string } | null
+        throw new Error(body?.error ?? `Failed (${res.status})`)
+      }
+      onSent()
+    } catch (err) {
+      setError(String(err))
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="stitched space-y-2 rounded-md bg-steel-900/60 p-3">
+      <p className="stamp !text-cloth-400">What's the right answer?</p>
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        rows={2}
+        autoFocus
+        placeholder="e.g. Nah — the K6 takes 794 needles for that job, not 135x17…"
+        className="field w-full resize-y p-3 text-[14px] leading-relaxed"
+      />
+      {error && <p className="text-[13px] text-stop-500">{error}</p>}
+      <div className="flex gap-2">
+        <button onClick={() => void submit()} disabled={busy || !text.trim()} className="btn-safety display min-h-11 px-4 text-base tracking-wide">
+          {busy ? 'Sending…' : 'Send to Tony'}
+        </button>
+        <button onClick={() => setOpen(false)} disabled={busy} className="stamp min-h-11 rounded border border-steel-600 px-3 !text-cloth-600">
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
 }
 
 export default function ChatPage() {
@@ -202,6 +267,16 @@ export default function ChatPage() {
                 <p className="pl-1 text-[13px] leading-snug text-safety-400">
                   <span className="stamp !text-safety-400">Gap logged for Tony</span> — “{t.gap}”
                 </p>
+              )}
+
+              {!t.streaming && t.text && (
+                <CorrectionFlow
+                  turn={t}
+                  question={turns[i - 1]?.text ?? ''}
+                  onSent={() =>
+                    setTurns((all) => all.map((x, j) => (j === i ? { ...x, corrected: true } : x)))
+                  }
+                />
               )}
             </div>
           ),
