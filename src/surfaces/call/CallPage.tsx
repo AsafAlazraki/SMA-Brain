@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import { streamSSE } from '../../lib/sse'
 import { getAccessToken } from '../../lib/supabase'
 import { startRecording, transcribeBlob, speak, stripForSpeech, type Recorder } from '../../lib/voice'
-import { Avatar, type PersonaState } from '../../lib/persona/Avatar'
+import { Persona, type PersonaState } from '../../lib/persona/Persona'
 
 /**
  * The call — FaceTime with the brain. Tap to talk, she listens, thinks,
@@ -111,7 +111,7 @@ export default function CallPage() {
     <div className="relative flex h-full flex-col items-center overflow-hidden">
       {/* she fills the scene */}
       <div className="flex min-h-0 w-full flex-1 items-center justify-center px-6 pt-2">
-        <Avatar state={state} levelRef={levelRef} className="h-full max-h-[46vh] w-auto max-w-full sm:max-h-[52vh]" />
+        <Persona state={state} levelRef={levelRef} className="h-full max-h-[46vh] w-auto max-w-full sm:max-h-[52vh]" />
       </div>
 
       {/* nameplate + status */}

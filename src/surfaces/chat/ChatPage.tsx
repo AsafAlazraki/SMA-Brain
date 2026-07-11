@@ -4,7 +4,7 @@ import { supabase, isSupabaseConfigured, getAccessToken } from '../../lib/supaba
 import { Markdown } from '../../lib/markdown'
 import { MicButton, SpeakButton } from '../../lib/voice-buttons'
 import { speak, stripForSpeech } from '../../lib/voice'
-import { Avatar, type PersonaState } from '../../lib/persona/Avatar'
+import { Persona, type PersonaState } from '../../lib/persona/Persona'
 
 type ResponseMode = 'text' | 'voice' | 'both'
 
@@ -289,7 +289,7 @@ export default function ChatPage() {
             personaState === 'speaking' ? 'border-safety-500' : 'border-steel-700'
           }`}
         >
-          <Avatar state={personaState} levelRef={levelRef} className="h-full w-full scale-[1.35]" />
+          <Persona state={personaState} levelRef={levelRef} className="h-full w-full scale-[1.35]" />
         </button>
       )}
 
