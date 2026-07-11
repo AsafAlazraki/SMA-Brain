@@ -6,7 +6,7 @@ export type PersonaState = 'idle' | 'listening' | 'thinking' | 'speaking'
  * The face of the brain — hand-built illustrated portrait, animated at 60fps
  * without re-renders: blinks, breathes, tilts to listen, glances up to think,
  * and speaks with her lips driven by the live TTS amplitude in levelRef.
- * Flat editorial style on the workshop palette; no vendors, no video.
+ * Soft-shaded editorial style on the workshop palette; no vendors, no video.
  */
 export function Avatar({
   state,
@@ -18,8 +18,8 @@ export function Avatar({
   className?: string
 }) {
   const headRef = useRef<SVGGElement | null>(null)
-  const lidLRef = useRef<SVGRectElement | null>(null)
-  const lidRRef = useRef<SVGRectElement | null>(null)
+  const lidLRef = useRef<SVGPathElement | null>(null)
+  const lidRRef = useRef<SVGPathElement | null>(null)
   const pupilsRef = useRef<SVGGElement | null>(null)
   const browsRef = useRef<SVGGElement | null>(null)
   const lipsClosedRef = useRef<SVGGElement | null>(null)
@@ -96,118 +96,174 @@ export function Avatar({
   return (
     <svg viewBox="0 0 400 460" className={className} role="img" aria-label="The Brain — your assistant">
       <defs>
-        <radialGradient id="spot" cx="50%" cy="34%" r="70%">
-          <stop offset="0%" stopColor="#22314b" />
+        <radialGradient id="spot" cx="50%" cy="32%" r="72%">
+          <stop offset="0%" stopColor="#243450" />
+          <stop offset="70%" stopColor="#131a28" />
           <stop offset="100%" stopColor="#0e1219" />
         </radialGradient>
-        <linearGradient id="hairShine" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#4a3526" />
-          <stop offset="100%" stopColor="#2b1d16" />
+        {/* skin with soft top-light */}
+        <linearGradient id="skin" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#f2c39c" />
+          <stop offset="62%" stopColor="#eab490" />
+          <stop offset="100%" stopColor="#d99f7a" />
         </linearGradient>
+        <linearGradient id="skinNeck" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#c98f66" />
+          <stop offset="55%" stopColor="#e0a87e" />
+        </linearGradient>
+        {/* hair: espresso with warm sheen */}
+        <linearGradient id="hairBase" x1="0.2" y1="0" x2="0.8" y2="1">
+          <stop offset="0%" stopColor="#3d2a1c" />
+          <stop offset="55%" stopColor="#271a10" />
+          <stop offset="100%" stopColor="#1c120a" />
+        </linearGradient>
+        <linearGradient id="hairLight" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#6b4b30" />
+          <stop offset="100%" stopColor="#3d2a1c" />
+        </linearGradient>
+        <radialGradient id="iris" cx="38%" cy="34%" r="72%">
+          <stop offset="0%" stopColor="#9c6b3f" />
+          <stop offset="55%" stopColor="#6b4224" />
+          <stop offset="100%" stopColor="#3f2413" />
+        </radialGradient>
+        <linearGradient id="lip" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#d47f90" />
+          <stop offset="100%" stopColor="#b2596c" />
+        </linearGradient>
+        <linearGradient id="jacket" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#3a5484" />
+          <stop offset="100%" stopColor="#273c60" />
+        </linearGradient>
+        <radialGradient id="blushG" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor="#e58a70" stopOpacity="0.55" />
+          <stop offset="100%" stopColor="#e58a70" stopOpacity="0" />
+        </radialGradient>
         <clipPath id="eyeL">
-          <path d="M146 230 Q163 216 181 229 Q164 245 146 230 Z" />
+          <path d="M147 231 Q165 215 185 229 Q167 246 147 231 Z" />
         </clipPath>
         <clipPath id="eyeR">
-          <path d="M219 229 Q237 216 254 230 Q236 245 219 229 Z" />
+          <path d="M215 229 Q235 215 253 231 Q233 246 215 229 Z" />
         </clipPath>
       </defs>
 
-      {/* backdrop spotlight + listening ring */}
+      {/* backdrop spotlight + rim + listening ring */}
       <circle cx="200" cy="230" r="186" fill="url(#spot)" />
+      <circle cx="200" cy="230" r="185" fill="none" stroke="#7c97c9" strokeOpacity="0.12" strokeWidth="1.5" />
       <circle ref={ringRef} cx="200" cy="230" r="180" fill="none" stroke="#ff6b1a" strokeWidth="2.5" strokeDasharray="9 14" opacity="0" />
 
       <g ref={headRef}>
-        {/* hair — back mass */}
+        {/* ── hair: back mass with soft waves falling over the shoulders ── */}
         <path
-          fill="url(#hairShine)"
-          d="M200 82 C132 82 106 138 108 196 C109 238 118 280 112 330 C108 362 128 378 156 378 L244 378 C272 378 292 362 288 330 C282 280 291 238 292 196 C294 138 268 82 200 82 Z"
+          fill="url(#hairBase)"
+          d="M200 76 C136 76 104 126 106 190 C107 232 112 262 106 300 C102 328 112 348 130 356 C122 330 124 306 130 284 C126 322 136 352 158 366 C148 338 148 314 150 292 L250 292 C252 314 252 338 242 366 C264 352 274 322 270 284 C276 306 278 330 270 356 C288 348 298 328 294 300 C288 262 293 232 294 190 C296 126 264 76 200 76 Z"
         />
 
-        {/* shoulders — denim jacket over tee */}
-        <g>
-          <path fill="#2e4470" d="M96 460 C98 408 128 382 165 372 L235 372 C272 382 302 408 304 460 Z" />
-          <path fill="#48679c" d="M162 372 L165 372 C165 396 172 428 178 460 L160 460 C152 428 154 396 162 372 Z" />
-          <path fill="#48679c" d="M238 372 L235 372 C235 396 228 428 222 460 L240 460 C248 428 246 396 238 372 Z" />
-          <path fill="#edf1f8" d="M178 376 C186 400 214 400 222 376 C222 396 218 430 214 460 L186 460 C182 430 178 396 178 376 Z" />
-        </g>
+        {/* ── shoulders: denim jacket + tee + pendant ── */}
+        <path fill="url(#jacket)" d="M92 460 C94 406 126 380 164 370 L236 370 C274 380 306 406 308 460 Z" />
+        <path fill="#48679c" d="M164 370 C160 396 158 428 162 460 L180 460 C174 428 172 396 176 372 Z" />
+        <path fill="#48679c" d="M236 370 C240 396 242 428 238 460 L220 460 C226 428 228 396 224 372 Z" />
+        <path fill="#22355a" d="M164 370 L176 372 C176 380 178 390 180 398 L166 388 Z" />
+        <path fill="#22355a" d="M236 370 L224 372 C224 380 222 390 220 398 L234 388 Z" />
+        <path fill="#f2f5fa" d="M176 372 C184 396 216 396 224 372 C226 398 222 432 218 460 L182 460 C178 432 174 398 176 372 Z" />
+        <path d="M200 388 L200 370" stroke="#c9d4e6" strokeWidth="1.5" opacity="0.7" />
+        <circle cx="200" cy="392" r="4.4" fill="#ff6b1a" />
+        <path d="M188 372 Q200 384 212 372" stroke="#c9a45c" strokeWidth="1.6" fill="none" opacity="0.9" />
 
-        {/* neck */}
-        <path fill="#e0a87e" d="M178 318 L222 318 L222 362 C222 378 178 378 178 362 Z" />
-        <path fill="#c98f66" d="M178 318 L222 318 L222 334 C208 344 192 344 178 334 Z" />
+        {/* ── neck with jaw shadow ── */}
+        <path fill="url(#skinNeck)" d="M181 312 L219 312 L219 358 C219 374 181 374 181 358 Z" />
 
-        {/* face — soft oval, fuller cheeks, gentle chin */}
+        {/* ── face: soft heart shape, gentle chin ── */}
         <path
-          fill="#e8b48f"
-          d="M200 122 C152 122 136 160 136 202 C136 232 142 258 154 278 C166 298 182 310 200 310 C218 310 234 298 246 278 C258 258 264 232 264 202 C264 160 248 122 200 122 Z"
+          fill="url(#skin)"
+          d="M200 118 C154 118 137 154 137 198 C137 230 143 258 156 280 C168 300 183 311 200 311 C217 311 232 300 244 280 C257 258 263 230 263 198 C263 154 246 118 200 118 Z"
         />
-        {/* earrings peeking below the hair */}
-        <circle cx="141" cy="250" r="4" fill="#ff6b1a" />
-        <circle cx="259" cy="250" r="4" fill="#ff6b1a" />
+        {/* forehead sheen */}
+        <ellipse cx="200" cy="170" rx="44" ry="22" fill="#fdf8f2" opacity="0.10" />
+        {/* cheek blush */}
+        <ellipse cx="161" cy="260" rx="15" ry="9" fill="url(#blushG)" />
+        <ellipse cx="239" cy="260" rx="15" ry="9" fill="url(#blushG)" />
 
-        {/* brows — soft arches */}
-        <g ref={browsRef} stroke="#3a2a20" strokeWidth="4.2" strokeLinecap="round" fill="none">
-          <path d="M148 209 Q163 201 180 207" />
-          <path d="M220 207 Q237 201 252 209" />
+        {/* ── brows: sculpted tapered shapes ── */}
+        <g ref={browsRef} fill="#33231a">
+          <path d="M147 208 Q160 198 182 204 Q183 208 181 209 Q161 205 149 212 Z" />
+          <path d="M218 204 Q240 198 253 208 Q251 212 249 211 Q239 205 219 209 Z" />
         </g>
 
-        {/* eyes — larger, open, warm */}
+        {/* ── eyes ── */}
         <g>
-          <path d="M146 230 Q163 216 181 229 Q164 245 146 230 Z" fill="#fdf8f2" />
-          <path d="M219 229 Q237 216 254 230 Q236 245 219 229 Z" fill="#fdf8f2" />
+          {/* soft shadow above lids */}
+          <path d="M147 227 Q166 212 185 226" stroke="#c98f66" strokeWidth="5" fill="none" opacity="0.35" strokeLinecap="round" />
+          <path d="M215 226 Q234 212 253 227" stroke="#c98f66" strokeWidth="5" fill="none" opacity="0.35" strokeLinecap="round" />
+          {/* whites */}
+          <path d="M147 231 Q165 215 185 229 Q167 246 147 231 Z" fill="#fdfaf6" />
+          <path d="M215 229 Q235 215 253 231 Q233 246 215 229 Z" fill="#fdfaf6" />
+          {/* iris + pupil + catchlights */}
           <g ref={pupilsRef}>
             <g clipPath="url(#eyeL)">
-              <circle cx="164" cy="230" r="8.6" fill="#5b3a24" />
-              <circle cx="164" cy="230" r="4" fill="#241408" />
-              <circle cx="167" cy="227" r="2" fill="#fdf8f2" />
+              <circle cx="167" cy="230" r="9.6" fill="url(#iris)" />
+              <circle cx="167" cy="230" r="4.4" fill="#160c05" />
+              <circle cx="170.5" cy="226.5" r="2.5" fill="#ffffff" />
+              <circle cx="163.5" cy="233.5" r="1.2" fill="#ffffff" opacity="0.6" />
             </g>
             <g clipPath="url(#eyeR)">
-              <circle cx="236" cy="230" r="8.6" fill="#5b3a24" />
-              <circle cx="236" cy="230" r="4" fill="#241408" />
-              <circle cx="239" cy="227" r="2" fill="#fdf8f2" />
+              <circle cx="233" cy="230" r="9.6" fill="url(#iris)" />
+              <circle cx="233" cy="230" r="4.4" fill="#160c05" />
+              <circle cx="236.5" cy="226.5" r="2.5" fill="#ffffff" />
+              <circle cx="229.5" cy="233.5" r="1.2" fill="#ffffff" opacity="0.6" />
             </g>
           </g>
-          {/* eyelids (blink) — skin-toned shutters scaling down over the eyes */}
-          <g>
-            <rect ref={lidLRef} x="143" y="215" width="42" height="30" fill="#e8b48f" style={{ transformOrigin: '164px 215px' }} transform="scale(1 0.001)" />
-            <rect ref={lidRRef} x="216" y="215" width="42" height="30" fill="#e8b48f" style={{ transformOrigin: '237px 215px' }} transform="scale(1 0.001)" />
-          </g>
-          {/* lash lines + small flicks */}
-          <path d="M146 229 Q163 215 181 228" stroke="#2b1d16" strokeWidth="3.4" fill="none" strokeLinecap="round" />
-          <path d="M219 228 Q237 215 254 229" stroke="#2b1d16" strokeWidth="3.4" fill="none" strokeLinecap="round" />
-          <path d="M146 230 L140 226" stroke="#2b1d16" strokeWidth="2.6" strokeLinecap="round" />
-          <path d="M254 230 L260 226" stroke="#2b1d16" strokeWidth="2.6" strokeLinecap="round" />
+          {/* eyelids (blink) — skin shutters shaped to the sockets */}
+          <path ref={lidLRef} d="M145 218 L187 218 L187 246 Q166 250 145 246 Z" fill="#ecb891" style={{ transformOrigin: '166px 218px' }} transform="scale(1 0.001)" />
+          <path ref={lidRRef} d="M213 218 L255 218 L255 246 Q234 250 213 246 Z" fill="#ecb891" style={{ transformOrigin: '234px 218px' }} transform="scale(1 0.001)" />
+          {/* lash lines with wings */}
+          <path d="M147 230 Q165 214 185 228" stroke="#241408" strokeWidth="3.8" fill="none" strokeLinecap="round" />
+          <path d="M215 228 Q235 214 253 230" stroke="#241408" strokeWidth="3.8" fill="none" strokeLinecap="round" />
+          <path d="M147 230 L141 225" stroke="#241408" strokeWidth="3" strokeLinecap="round" />
+          <path d="M253 230 L259 225" stroke="#241408" strokeWidth="3" strokeLinecap="round" />
+          {/* lower lash hint */}
+          <path d="M152 239 Q166 245 181 239" stroke="#b07a54" strokeWidth="2" fill="none" opacity="0.55" strokeLinecap="round" />
+          <path d="M219 239 Q234 245 248 239" stroke="#b07a54" strokeWidth="2" fill="none" opacity="0.55" strokeLinecap="round" />
         </g>
 
-        {/* nose — minimal */}
-        <path d="M200 246 Q198 258 194 264 Q199 268 206 265" stroke="#c98f66" strokeWidth="3" fill="none" strokeLinecap="round" />
+        {/* ── nose: soft shadow, no outline ── */}
+        <path d="M197 240 Q193 258 190 264 Q195 270 200 268" fill="none" stroke="#d99f7a" strokeWidth="3.4" strokeLinecap="round" opacity="0.8" />
+        <ellipse cx="194" cy="267" rx="2" ry="1.3" fill="#c98f66" opacity="0.7" />
+        <ellipse cx="205" cy="267" rx="2" ry="1.3" fill="#c98f66" opacity="0.7" />
 
-        {/* blush */}
-        <ellipse cx="158" cy="258" rx="11" ry="6" fill="#e59a78" opacity="0.45" />
-        <ellipse cx="242" cy="258" rx="11" ry="6" fill="#e59a78" opacity="0.45" />
-
-        {/* mouth — open layer (amplitude-driven), pivot at lip line */}
-        <g ref={mouthOpenRef} opacity="0" style={{ transformOrigin: '200px 286px' }}>
-          <path d="M183 286 Q200 282 217 286 Q214 305 200 307 Q186 305 183 286 Z" fill="#5e2330" />
-          <path d="M188 286 Q200 284 212 286 Q210 292 200 293 Q190 292 188 286 Z" fill="#fdf8f2" />
-          <path d="M187 299 Q200 306 213 299 Q208 305 200 306 Q192 305 187 299 Z" fill="#c66a80" />
+        {/* ── mouth: open layer (amplitude-driven) ── */}
+        <g ref={mouthOpenRef} opacity="0" style={{ transformOrigin: '200px 288px' }}>
+          <path d="M182 288 Q200 283 218 288 Q215 308 200 310 Q185 308 182 288 Z" fill="#59202c" />
+          <path d="M188 288 Q200 285 212 288 Q210 294 200 295 Q190 294 188 288 Z" fill="#fdfaf6" />
+          <path d="M186 301 Q200 309 214 301 Q209 307 200 308 Q191 307 186 301 Z" fill="#c9697e" />
         </g>
-        {/* mouth — closed: soft smile with cupid's bow */}
+        {/* ── mouth: closed — full lips, cupid's bow, soft smile ── */}
         <g ref={lipsClosedRef}>
-          <path d="M183 286 Q192 280 198 284 Q200 285 202 284 Q208 280 217 286 Q209 293 200 293 Q191 293 183 286 Z" fill="#c66a80" />
-          <path d="M186 288 Q200 296 214 288 Q208 296 200 296 Q192 296 186 288 Z" fill="#a94f66" />
+          <path
+            d="M181 287 Q190 279 197 283 Q200 285 203 283 Q210 279 219 287 Q212 291 200 291 Q188 291 181 287 Z"
+            fill="url(#lip)"
+          />
+          <path d="M183 288 Q200 299 217 288 Q211 297 200 297 Q189 297 183 288 Z" fill="#a94f63" />
+          <path d="M193 285 Q200 288 207 285" stroke="#8e3c50" strokeWidth="1.4" fill="none" opacity="0.7" />
+          <ellipse cx="200" cy="293" rx="6" ry="1.6" fill="#e8a2b0" opacity="0.55" />
         </g>
 
-        {/* hair — front: curtain part, both eyes clear, face-framing strands */}
+        {/* ── hair: front — two clean curtain lobes meeting at a centre part;
+               they hug the OUTSIDE of the face and never cross it ── */}
         <path
-          fill="url(#hairShine)"
-          d="M200 84 C144 84 120 126 122 184 L128 300 C129 316 138 324 148 322 C142 288 138 246 142 212 C146 178 154 156 170 144 C163 168 161 190 162 204 C176 178 206 166 224 150 C230 168 238 184 252 194 C256 206 258 240 254 288 C252 310 258 322 268 320 C276 316 279 306 278 292 L280 184 C282 126 256 84 200 84 Z"
+          fill="url(#hairBase)"
+          d="M204 110 C168 114 146 144 140 186 C130 238 132 296 150 338 C156 341 161 338 163 333 C152 296 150 246 156 206 C160 178 172 154 192 142 C198 133 202 122 204 110 Z"
         />
-        {/* loose face-framing strand */}
-        <path d="M168 148 Q158 190 162 232" stroke="url(#hairShine)" strokeWidth="9" fill="none" strokeLinecap="round" />
-        <path d="M240 160 Q248 196 246 234" stroke="url(#hairShine)" strokeWidth="8" fill="none" strokeLinecap="round" />
-        {/* hair shine */}
-        <path d="M150 130 Q138 176 142 230" stroke="#5d4432" strokeWidth="4" fill="none" strokeLinecap="round" opacity="0.45" />
-        <path d="M254 136 Q262 180 258 232" stroke="#5d4432" strokeWidth="4" fill="none" strokeLinecap="round" opacity="0.4" />
+        <path
+          fill="url(#hairBase)"
+          d="M204 110 C244 111 264 142 268 184 C276 238 272 300 256 338 C250 341 245 338 243 333 C254 296 256 248 250 208 C246 180 236 158 218 146 C210 136 205 122 204 110 Z"
+        />
+        {/* crown — solid cover, part reads as a seam line */}
+        <path fill="url(#hairBase)" d="M148 176 C142 118 170 98 202 97 C238 96 262 122 256 172 C248 134 228 118 204 118 C178 118 158 140 148 176 Z" />
+        <path d="M205 103 L199 136" stroke="#150b05" strokeWidth="2.4" strokeLinecap="round" opacity="0.55" />
+        {/* highlight ribbons on the outer falls */}
+        <path d="M148 160 Q136 220 146 300" stroke="url(#hairLight)" strokeWidth="5.5" fill="none" strokeLinecap="round" opacity="0.5" />
+        <path d="M258 164 Q270 224 260 302" stroke="url(#hairLight)" strokeWidth="5" fill="none" strokeLinecap="round" opacity="0.45" />
+        <path d="M186 146 Q172 176 166 214" stroke="url(#hairLight)" strokeWidth="3" fill="none" strokeLinecap="round" opacity="0.4" />
       </g>
     </svg>
   )
