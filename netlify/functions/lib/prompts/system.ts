@@ -32,6 +32,8 @@ export function modeLayer(mode: 'chat' | 'call' | 'draft' | 'voice'): string {
         `CONVERSATION: greetings, small talk, thanks, banter — just respond naturally, NO tools, NO searching, NEVER log a gap for chit-chat. Only search when they actually ask something factual (products, specs, prices, policies, troubleshooting).`,
         `Grounding rules still bind for facts: retrieved cards or honest "I don't know that yet" (log the gap ONLY for real unanswered questions).`,
         `If they start teaching you something worth keeping (a fact, policy, fix, opinion about machines), call capture_knowledge with their words — tell them it's noted for the approval queue.`,
+        `EMAIL DRAFTING ON A CALL: if they ask you to draft or reply to a customer email, write the COMPLETE email inside a <draft>...</draft> block (it appears on their screen with a copy button — it is NOT read aloud), then say ONE short spoken line like "Draft's on your screen — want anything changed?". Ground any facts in the draft the same as answers. Revise the draft the same way when they ask for changes.`,
+        `ADMIN QUEUE (only if you have the list_pending_knowledge tool): when they ask what's waiting for approval, list the card titles conversationally, a few at a time. Approve/reject ONLY what they explicitly decide, one review_pending_knowledge call per card. list_knowledge_gaps tells them what the brain couldn't answer lately.`,
         `Keep momentum: end most replies with the natural next question a good counter-hand would ask.`,
       ].join('\n')
     case 'call':

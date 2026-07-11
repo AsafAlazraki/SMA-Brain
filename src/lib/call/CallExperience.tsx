@@ -15,6 +15,8 @@ export function CallExperience({ onClose }: { onClose: () => void }) {
   const [onCall, setOnCall] = useState(false)
   const [heard, setHeard] = useState<string | null>(null)
   const [caption, setCaption] = useState<string>('')
+  const [draft, setDraft] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
   const [note, setNote] = useState<string | null>(null)
   const levelRef = useRef(0)
   const recorder = useRef<Recorder | null>(null)
@@ -117,6 +119,9 @@ export function CallExperience({ onClose }: { onClose: () => void }) {
             const delta = String(d.text ?? '')
             raw += delta
             setCaption(stripForSpeech(raw))
+            // drafts stream onto the screen (copyable), never into the voice
+            const draftMatch = /<draft>([\s\S]*?)(<\/draft>|$)/.exec(raw)
+            if (draftMatch?.[1]) setDraft(draftMatch[1].trim())
             stream.addText(delta)
           }
           if (event === 'error') setNote(String(d.message ?? 'The brain dropped out — try again.'))
@@ -124,7 +129,8 @@ export function CallExperience({ onClose }: { onClose: () => void }) {
         { token },
       )
       stream.finish()
-      const answerText = stripForSpeech(raw)
+      // keep <draft> blocks in history so "change the second line" has the draft in context
+      const answerText = raw.replace(/<cited>[\s\S]*?(<\/cited>|$)/g, '').trim()
       if (answerText) {
         history.current = [
           ...history.current,
@@ -200,7 +206,11 @@ export function CallExperience({ onClose }: { onClose: () => void }) {
       </div>
 
       <div className="flex min-h-0 w-full flex-1 items-center justify-center px-6">
-        <Persona state={state} levelRef={levelRef} className="h-full max-h-[42vh] w-auto max-w-full sm:max-h-[48vh]" />
+        <Persona
+          state={state}
+          levelRef={levelRef}
+          className={`h-full w-auto max-w-full ${draft ? 'max-h-[22vh]' : 'max-h-[42vh] sm:max-h-[48vh]'}`}
+        />
       </div>
 
       <div className="text-center">
@@ -222,7 +232,36 @@ export function CallExperience({ onClose }: { onClose: () => void }) {
         {heard && (
           <p className="stitched mx-auto mb-2 w-fit max-w-full truncate rounded-md bg-steel-800/70 px-3 py-1.5 text-[13px] text-denim-300">“{heard}”</p>
         )}
-        {caption && <p className="mx-auto max-h-24 overflow-y-auto text-[15px] leading-relaxed text-cloth-100">{caption}</p>}
+        {draft && (
+          <div className="stitched mb-2 rounded-md bg-steel-900/90 text-left">
+            <div className="flex items-center justify-between gap-2 border-b border-steel-700 px-3 py-1.5">
+              <span className="stamp !text-safety-400">Email draft</span>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => {
+                    void navigator.clipboard.writeText(draft)
+                    setCopied(true)
+                    setTimeout(() => setCopied(false), 1600)
+                  }}
+                  className="stamp flex min-h-9 items-center rounded bg-safety-500 px-3 !text-safety-950 transition hover:brightness-110"
+                >
+                  {copied ? 'Copied ✓' : 'Copy'}
+                </button>
+                <button
+                  onClick={() => setDraft(null)}
+                  aria-label="Dismiss draft"
+                  className="flex min-h-9 min-w-9 items-center justify-center rounded text-cloth-500 transition hover:text-cloth-100"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden>
+                    <path d="M18 6 6 18M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <pre className="max-h-[30vh] overflow-y-auto whitespace-pre-wrap px-3 py-2 font-sans text-[13.5px] leading-relaxed text-cloth-100">{draft}</pre>
+          </div>
+        )}
+        {caption && !draft && <p className="mx-auto max-h-24 overflow-y-auto text-[15px] leading-relaxed text-cloth-100">{caption}</p>}
         {note && <p className="text-[13px] text-stop-500">{note}</p>}
       </div>
 

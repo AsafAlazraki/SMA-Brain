@@ -4,6 +4,7 @@ import { getAccessToken } from './supabase'
 export function stripForSpeech(text: string): string {
   return text
     .replace(/<cited>[\s\S]*?(<\/cited>|$)/g, '')
+    .replace(/<draft>[\s\S]*?(<\/draft>|$)/g, '') // drafts render on screen, never read aloud
     .replace(/\*\*([^*]+)\*\*/g, '$1')
     .replace(/\*([^*\n]+)\*/g, '$1')
     .replace(/`([^`\n]+)`/g, '$1')

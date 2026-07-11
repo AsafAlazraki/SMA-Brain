@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { env, isMockLLM } from './env'
 import { searchKnowledge, searchProducts, logGap, type ProductHit } from './retrieval'
 import { distillToCards, queueProposals } from './learning'
+import { listPendingKnowledge, reviewPendingKnowledge, listKnowledgeGaps } from './voice-admin'
 import { MOCK_ANSWER_NOTE } from './mock'
 
 const TOOLS: Anthropic.Tool[] = [
@@ -46,17 +47,43 @@ const TOOLS: Anthropic.Tool[] = [
   },
 ]
 
-/** Admin-only extra tool: the caller teaches something → distil → approval queue. */
-const CAPTURE_TOOL: Anthropic.Tool = {
-  name: 'capture_knowledge',
-  description:
-    "The caller (Tony/admin) just taught you something worth keeping — a fact, policy, fault fix, or opinion. Pass their teaching verbatim; it gets written up into knowledge cards for the approval queue. Use for real knowledge only, never for questions or chit-chat.",
-  input_schema: {
-    type: 'object' as const,
-    properties: { teaching: { type: 'string', description: "The caller's teaching, verbatim or near-verbatim" } },
-    required: ['teaching'],
+/** Admin-only tools: teach, review the approval queue, and hear open gaps — all by voice. */
+const ADMIN_TOOLS: Anthropic.Tool[] = [
+  {
+    name: 'capture_knowledge',
+    description:
+      "The caller (Tony/admin) just taught you something worth keeping — a fact, policy, fault fix, or opinion. Pass their teaching verbatim; it gets written up into knowledge cards for the approval queue. Use for real knowledge only, never for questions or chit-chat.",
+    input_schema: {
+      type: 'object' as const,
+      properties: { teaching: { type: 'string', description: "The caller's teaching, verbatim or near-verbatim" } },
+      required: ['teaching'],
+    },
   },
-}
+  {
+    name: 'list_pending_knowledge',
+    description:
+      'List knowledge cards waiting in the approval queue. Use when the admin asks what needs approving / reviewing. Returns id, title, summary per card.',
+    input_schema: { type: 'object' as const, properties: {} },
+  },
+  {
+    name: 'review_pending_knowledge',
+    description:
+      'Approve or reject ONE pending queue card by id (from list_pending_knowledge). Only call after the admin has clearly said which card and which way — never approve on your own initiative.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        queue_id: { type: 'string' },
+        verdict: { type: 'string', enum: ['approved', 'rejected'] },
+      },
+      required: ['queue_id', 'verdict'],
+    },
+  },
+  {
+    name: 'list_knowledge_gaps',
+    description: "List recent questions the brain couldn't answer (open knowledge gaps), so the admin can teach the missing pieces.",
+    input_schema: { type: 'object' as const, properties: {} },
+  },
+]
 
 export type Citation = { id: string; title: string }
 
@@ -95,7 +122,8 @@ export async function runAgent(opts: {
   const productsSeen = new Map<string, ProductHit>()
   const maxRounds = opts.maxToolRounds ?? 4
 
-  const tools = opts.captureAsUser !== undefined && opts.captureAsUser !== null ? [...TOOLS, CAPTURE_TOOL] : TOOLS
+  const adminId = opts.captureAsUser ?? null
+  const tools = adminId ? [...TOOLS, ...ADMIN_TOOLS] : TOOLS
 
   for (let round = 0; round <= maxRounds; round++) {
     // last round: no more tools — the model must answer with what it has
@@ -145,10 +173,20 @@ export async function runAgent(opts: {
           await logGap(input.question ?? '')
           opts.events.onGap(input.question ?? '')
           resultPayload = { logged: true }
-        } else if (tu.name === 'capture_knowledge' && opts.captureAsUser) {
+        } else if (tu.name === 'capture_knowledge' && adminId) {
           const cards = await distillToCards(input.teaching ?? '', 'blurt')
-          const queued = await queueProposals(cards, 'blurt', opts.captureAsUser, { kind: 'voice_call' })
+          const queued = await queueProposals(cards, 'blurt', adminId, { kind: 'voice_call' })
           resultPayload = { queued }
+        } else if (tu.name === 'list_pending_knowledge' && adminId) {
+          resultPayload = await listPendingKnowledge()
+        } else if (tu.name === 'review_pending_knowledge' && adminId) {
+          resultPayload = await reviewPendingKnowledge(
+            input.queue_id ?? '',
+            input.verdict === 'rejected' ? 'rejected' : 'approved',
+            adminId,
+          )
+        } else if (tu.name === 'list_knowledge_gaps' && adminId) {
+          resultPayload = await listKnowledgeGaps()
         } else {
           resultPayload = { error: `unknown tool ${tu.name}` }
         }
@@ -173,6 +211,10 @@ function toolSummary(name: string, input: Record<string, string>): string {
   if (name === 'search_knowledge') return `Checking the brain: “${input.query ?? ''}”`
   if (name === 'search_products') return `Checking the catalogue: “${input.query ?? ''}”`
   if (name === 'log_gap') return 'Logging a knowledge gap for Tony'
+  if (name === 'capture_knowledge') return 'Noting that for the approval queue'
+  if (name === 'list_pending_knowledge') return 'Fetching the approval queue'
+  if (name === 'review_pending_knowledge') return input.verdict === 'rejected' ? 'Rejecting a card' : 'Approving a card'
+  if (name === 'list_knowledge_gaps') return 'Fetching open knowledge gaps'
   return name
 }
 
