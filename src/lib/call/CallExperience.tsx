@@ -27,7 +27,7 @@ export function CallExperience({ onClose }: { onClose: () => void }) {
   stateRef.current = state
   const onCallRef = useRef(onCall)
   onCallRef.current = onCall
-  const vad = useRef({ heardSpeech: false, lastVoiceAt: 0, startedAt: 0 })
+  const vad = useRef({ heardSpeech: false, lastVoiceAt: 0, startedAt: 0, ambient: 0 })
 
   useEffect(() => {
     return () => {
@@ -40,18 +40,26 @@ export function CallExperience({ onClose }: { onClose: () => void }) {
     if (!onCallRef.current || stateRef.current === 'listening') return
     setNote(null)
     try {
-      vad.current = { heardSpeech: false, lastVoiceAt: 0, startedAt: performance.now() }
+      vad.current = { heardSpeech: false, lastVoiceAt: 0, startedAt: performance.now(), ambient: 0 }
       recorder.current = await startRecording((l) => {
         levelRef.current = l
         const now = performance.now()
         const v = vad.current
-        if (l > 0.12) {
+        // first 400ms: calibrate the room so fans/workshop hum don't count as speech
+        if (now - v.startedAt < 400) {
+          v.ambient = Math.max(v.ambient, l)
+          return
+        }
+        const threshold = Math.min(0.3, Math.max(0.1, v.ambient * 2.2))
+        if (l > threshold) {
           v.heardSpeech = true
           v.lastVoiceAt = now
         }
         if (stateRef.current !== 'listening') return
         const silentFor = now - Math.max(v.lastVoiceAt, v.startedAt)
-        if ((v.heardSpeech && silentFor > 1400) || (!v.heardSpeech && now - v.startedAt > 9000) || now - v.startedAt > 60_000) {
+        // 2.3s of quiet ends the turn — long enough to think mid-sentence,
+        // short enough to stay conversational; tap ends it instantly
+        if ((v.heardSpeech && silentFor > 2300) || (!v.heardSpeech && now - v.startedAt > 10_000) || now - v.startedAt > 60_000) {
           void finishListening()
         }
       })
@@ -182,7 +190,7 @@ export function CallExperience({ onClose }: { onClose: () => void }) {
   const status = !onCall
     ? 'Tap the mic and just talk'
     : state === 'listening'
-      ? 'Listening — pause when you’re done'
+      ? 'Listening — tap when you’re done'
       : state === 'thinking'
         ? 'Thinking…'
         : state === 'speaking'

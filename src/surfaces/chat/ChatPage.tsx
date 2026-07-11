@@ -3,7 +3,7 @@ import { streamSSE } from '../../lib/sse'
 import { supabase, isSupabaseConfigured, getAccessToken } from '../../lib/supabase'
 import { Markdown } from '../../lib/markdown'
 import { MicButton, SpeakButton } from '../../lib/voice-buttons'
-import { speak, stripForSpeech } from '../../lib/voice'
+import { createSpeechStream, stripForSpeech } from '../../lib/voice'
 import { Persona, type PersonaState } from '../../lib/persona/Persona'
 
 type ResponseMode = 'text' | 'voice' | 'both'
@@ -187,6 +187,21 @@ export default function ChatPage() {
     setTurns((t) => [...t, { role: 'user', text: question }, { role: 'assistant', text: '', streaming: true }])
     let answerText = ''
 
+    // voice modes speak sentence-by-sentence AS the answer streams — waiting
+    // for the full text before speaking felt like "takes forever"
+    const wantSpeech = responseMode !== 'text'
+    const speech = wantSpeech
+      ? createSpeechStream({
+          onLevel: (l) => (levelRef.current = l),
+          onStart: () => setPersonaState('speaking'),
+          onEnd: () => {
+            stopSpeech.current = null
+            setPersonaState('idle')
+          },
+        })
+      : null
+    if (speech) stopSpeech.current = speech.stop
+
     const patch = (fn: (last: Turn) => Turn) =>
       setTurns((t) => {
         const copy = t.slice()
@@ -216,6 +231,7 @@ export default function ChatPage() {
           if (event === 'tool') patch((l) => ({ ...l, toolStatus: d.status === 'end' ? null : String(d.summary ?? 'thinking…') }))
           if (event === 'token') {
             answerText += String(d.text ?? '')
+            speech?.addText(String(d.text ?? ''))
             patch((l) => ({ ...l, text: l.text + String(d.text ?? '') }))
           }
           if (event === 'citations') patch((l) => ({ ...l, citations: d.entries as Citation[] }))
@@ -232,26 +248,19 @@ export default function ChatPage() {
         },
         { token },
       )
-    } catch (err) {
-      patch((l) => ({ ...l, streaming: false, text: l.text || `Something went wrong: ${String(err)}` }))
-    } finally {
-      setBusy(false)
-    }
-
-    // she reads the answer out when voice is on — fire-and-forget, tap the bubble to hush
-    const speech = stripForSpeech(answerText)
-    if (responseMode !== 'text' && speech) {
-      try {
-        setPersonaState('speaking')
-        const { stop, done } = await speak(speech, (l) => (levelRef.current = l))
-        stopSpeech.current = stop
-        await done
-      } catch {
-        /* voice unavailable (e.g. bench mode) — the text is still there */
-      } finally {
+      speech?.finish()
+      if (speech && !stripForSpeech(answerText)) {
+        speech.stop()
         stopSpeech.current = null
         setPersonaState('idle')
       }
+    } catch (err) {
+      speech?.stop()
+      stopSpeech.current = null
+      setPersonaState('idle')
+      patch((l) => ({ ...l, streaming: false, text: l.text || `Something went wrong: ${String(err)}` }))
+    } finally {
+      setBusy(false)
     }
   }
 

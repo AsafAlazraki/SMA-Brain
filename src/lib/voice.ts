@@ -107,13 +107,13 @@ export async function transcribeBlob(blob: Blob): Promise<string> {
 let currentAudio: HTMLAudioElement | null = null
 
 /** Fetch synthesized speech for a chunk of text. Returns null on failure. */
-async function fetchSpeech(text: string): Promise<Blob | null> {
+async function fetchSpeech(text: string, previousText?: string): Promise<Blob | null> {
   try {
     const token = await getAccessToken()
     const res = await fetch('/api/voice/tts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ text, ...(previousText ? { previous_text: previousText } : {}) }),
     })
     if (!res.ok) return null
     return await res.blob()
@@ -208,12 +208,16 @@ export function createSpeechStream(handlers: {
     }
   }
 
+  let prevSynthesized = ''
   const pump = () => {
     while (!stopped && inFlight < 2 && backlog.length > 0) {
       const sentence = backlog.shift()!
       inFlight++
       queuedCount++
-      const p = fetchSpeech(sentence).then((blob) => {
+      // previous_text keeps her intonation flowing across sentence chunks
+      const prev = prevSynthesized
+      prevSynthesized = sentence
+      const p = fetchSpeech(sentence, prev || undefined).then((blob) => {
         inFlight--
         pump()
         return blob

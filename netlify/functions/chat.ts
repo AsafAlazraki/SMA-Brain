@@ -50,7 +50,9 @@ export default async function handler(req: Request): Promise<Response> {
         messages: [...clientHistory, { role: 'user', content: message }],
         maxToolRounds: mode === 'chat' ? 3 : 2,
         effort: mode === 'chat' ? 'medium' : 'low',
-        tier: mode === 'voice' ? 'fast' : 'main', // spoken turns: snappy beats deep (docs/05)
+        // every conversational surface runs the fast tier — TTFT is the product
+        // (CLAUDE.md #5); the deep model stays on Draft where prose quality pays
+        tier: 'fast',
         // teaching from the call goes to the approval queue — admins only
         captureAsUser: mode === 'voice' && user.role === 'admin' && user.id !== MOCK_USER.id ? user.id : undefined,
         events: {

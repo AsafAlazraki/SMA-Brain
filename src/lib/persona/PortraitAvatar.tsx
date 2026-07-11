@@ -30,6 +30,7 @@ export function PortraitAvatar({
     let blinkStart = 0
     let mouthOpen = false
     let mouthChangedAt = 0
+    let env = 0 // amplitude envelope — fast attack, slow release
 
     const tick = (now: number) => {
       const t = now / 1000
@@ -57,20 +58,23 @@ export function PortraitAvatar({
       }
       if (eyesRef.current) eyesRef.current.style.opacity = lidsDown ? '1' : '0'
 
-      // mouth: 2-frame flap with hysteresis + minimum hold — crossfading
-      // between non-identical variants at 60fps strobes and looks unhinged
+      // mouth: 2-frame flap driven by a smoothed envelope, not raw RMS —
+      // instantaneous level dips mid-vowel caused spurious snaps (looked
+      // clacky). Fast attack / slow release + long holds ≈ syllable rate.
+      env = level > env ? level : env * 0.9
       if (s === 'speaking') {
         if (mouthOpen) {
-          if (level < 0.09 && now - mouthChangedAt > 90) {
+          if (env < 0.06 && now - mouthChangedAt > 160) {
             mouthOpen = false
             mouthChangedAt = now
           }
-        } else if (level > 0.2 && now - mouthChangedAt > 70) {
+        } else if (env > 0.15 && now - mouthChangedAt > 90) {
           mouthOpen = true
           mouthChangedAt = now
         }
       } else {
         mouthOpen = false
+        env = 0
       }
       if (mouthRef.current) mouthRef.current.style.opacity = mouthOpen ? '1' : '0'
 
@@ -121,7 +125,8 @@ export function PortraitAvatar({
         <div ref={frameRef} className="relative h-full w-full will-change-transform">
           <img src={PORTRAIT.base} alt="" className="h-full w-full object-cover" draggable={false} />
           <div ref={eyesRef} style={region(PORTRAIT.eyes, PORTRAIT.eyesClosed)} aria-hidden />
-          <div ref={mouthRef} style={region(PORTRAIT.mouth, PORTRAIT.mouthOpen)} aria-hidden />
+          {/* 70ms micro-fade: softens the snap without the ghosting of long crossfades */}
+          <div ref={mouthRef} style={{ ...region(PORTRAIT.mouth, PORTRAIT.mouthOpen), transition: 'opacity 70ms linear' }} aria-hidden />
         </div>
       </div>
     </div>

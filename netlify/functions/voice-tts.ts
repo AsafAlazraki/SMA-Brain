@@ -11,7 +11,7 @@ export default async function handler(req: Request): Promise<Response> {
   if (auth.failure) return auth.failure
   if (!isVoiceConfigured) return jsonResponse(501, { error: 'Voice not configured — set ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID' })
 
-  let body: { text?: string }
+  let body: { text?: string; previous_text?: string }
   try {
     body = await req.json()
   } catch {
@@ -21,7 +21,7 @@ export default async function handler(req: Request): Promise<Response> {
   if (!text) return jsonResponse(400, { error: 'text required' })
 
   try {
-    const audio = await synthesize(text)
+    const audio = await synthesize(text, (body.previous_text ?? '').trim() || undefined)
     return new Response(audio, { headers: { 'Content-Type': 'audio/mpeg', 'Cache-Control': 'no-store' } })
   } catch (err) {
     return jsonResponse(502, { error: String(err) })
