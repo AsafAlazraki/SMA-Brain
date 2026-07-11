@@ -3,6 +3,10 @@ import { streamSSE } from '../../lib/sse'
 import { supabase, isSupabaseConfigured, getAccessToken } from '../../lib/supabase'
 import { Markdown } from '../../lib/markdown'
 import { MicButton, SpeakButton } from '../../lib/voice-buttons'
+import { speak, stripForSpeech } from '../../lib/voice'
+import { Avatar, type PersonaState } from '../../lib/persona/Avatar'
+
+type ResponseMode = 'text' | 'voice' | 'both'
 
 type ProductCard = {
   id: string
@@ -28,6 +32,8 @@ type Turn = {
   corrected?: boolean
   messageId?: string
   feedback?: 'up' | 'down'
+  /** voice-only mode hides prose until tapped */
+  revealed?: boolean
 }
 
 const SUGGESTIONS = [
@@ -149,8 +155,24 @@ export default function ChatPage() {
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [callMode, setCallMode] = useState(false)
+  const [responseMode, setResponseMode] = useState<ResponseMode>(() => {
+    const saved = localStorage.getItem('brain-response-mode')
+    return saved === 'voice' || saved === 'both' ? saved : 'text'
+  })
+  const [personaState, setPersonaState] = useState<PersonaState>('idle')
+  const levelRef = useRef(0)
+  const stopSpeech = useRef<(() => void) | null>(null)
   const conversationId = useRef<string | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
+
+  function setMode(m: ResponseMode) {
+    setResponseMode(m)
+    localStorage.setItem('brain-response-mode', m)
+    if (m === 'text') {
+      stopSpeech.current?.()
+      setPersonaState('idle')
+    }
+  }
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
@@ -160,7 +182,10 @@ export default function ChatPage() {
     if (!question.trim() || busy) return
     setBusy(true)
     setInput('')
+    stopSpeech.current?.()
+    setPersonaState('idle')
     setTurns((t) => [...t, { role: 'user', text: question }, { role: 'assistant', text: '', streaming: true }])
+    let answerText = ''
 
     const patch = (fn: (last: Turn) => Turn) =>
       setTurns((t) => {
@@ -182,7 +207,10 @@ export default function ChatPage() {
             patch((l) => ({ ...l, messageId: String(d.messageId ?? '') || undefined }))
           }
           if (event === 'tool') patch((l) => ({ ...l, toolStatus: d.status === 'end' ? null : String(d.summary ?? 'thinking…') }))
-          if (event === 'token') patch((l) => ({ ...l, text: l.text + String(d.text ?? '') }))
+          if (event === 'token') {
+            answerText += String(d.text ?? '')
+            patch((l) => ({ ...l, text: l.text + String(d.text ?? '') }))
+          }
           if (event === 'citations') patch((l) => ({ ...l, citations: d.entries as Citation[] }))
           if (event === 'product_card') patch((l) => ({ ...l, products: [...(l.products ?? []), d as unknown as ProductCard] }))
           if (event === 'gap') patch((l) => ({ ...l, gap: String((d as { question?: string }).question ?? '') }))
@@ -202,11 +230,41 @@ export default function ChatPage() {
     } finally {
       setBusy(false)
     }
+
+    // she reads the answer out when voice is on — fire-and-forget, tap the bubble to hush
+    const speech = stripForSpeech(answerText)
+    if (responseMode !== 'text' && speech) {
+      try {
+        setPersonaState('speaking')
+        const { stop, done } = await speak(speech, (l) => (levelRef.current = l))
+        stopSpeech.current = stop
+        await done
+      } catch {
+        /* voice unavailable (e.g. bench mode) — the text is still there */
+      } finally {
+        stopSpeech.current = null
+        setPersonaState('idle')
+      }
+    }
   }
 
   return (
-    <div className="mx-auto flex h-full max-w-3xl flex-col">
-      <div className="flex items-center justify-end px-4 pt-3">
+    <div className="relative mx-auto flex h-full max-w-3xl flex-col">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-3">
+        {/* how she answers: text / voice / both */}
+        <div className="flex items-center rounded-md border border-steel-700 p-0.5" role="group" aria-label="How the brain answers">
+          {(['text', 'voice', 'both'] as const).map((m) => (
+            <button
+              key={m}
+              onClick={() => setMode(m)}
+              className={`stamp min-h-9 rounded px-3 transition ${
+                responseMode === m ? 'bg-steel-700 !text-cloth-100' : '!text-cloth-600 hover:!text-cloth-400'
+              }`}
+            >
+              {m === 'both' ? 'Text + voice' : m}
+            </button>
+          ))}
+        </div>
         <label className="flex min-h-11 cursor-pointer items-center gap-2">
           <input
             type="checkbox"
@@ -217,6 +275,23 @@ export default function ChatPage() {
           <span className={`stamp ${callMode ? '!text-safety-400' : ''}`}>On a call — fast answers</span>
         </label>
       </div>
+
+      {/* she's on the line — FaceTime-style bubble; tap to hush */}
+      {responseMode !== 'text' && (
+        <button
+          onClick={() => {
+            stopSpeech.current?.()
+            setPersonaState('idle')
+          }}
+          aria-label={personaState === 'speaking' ? 'Stop her talking' : 'The Brain is on the line'}
+          title={personaState === 'speaking' ? 'Tap to hush' : 'On the line'}
+          className={`absolute bottom-24 right-4 z-10 h-24 w-24 overflow-hidden rounded-full border-2 bg-iron-900 shadow-[0_4px_16px_rgba(0,0,0,0.6)] transition sm:h-28 sm:w-28 ${
+            personaState === 'speaking' ? 'border-safety-500' : 'border-steel-700'
+          }`}
+        >
+          <Avatar state={personaState} levelRef={levelRef} className="h-full w-full scale-[1.35]" />
+        </button>
+      )}
 
       <div ref={scrollRef} className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 pb-4 pt-2">
         {turns.length === 0 && (
@@ -259,14 +334,33 @@ export default function ChatPage() {
                 </div>
               )}
 
-              {(t.text || t.streaming) && (
-                /* bench plate — orange seam down the left */
-                <div className="plate rounded-md border-l-[3px] !border-l-safety-500 px-4 py-3">
-                  <div className={`text-[15px] leading-relaxed text-cloth-100 ${t.streaming ? 'caret' : ''}`}>
-                    <Markdown text={displayText(t.text)} />
+              {(t.text || t.streaming) &&
+                (responseMode === 'voice' && !t.revealed ? (
+                  /* voice-only: she says it — words tucked away until tapped */
+                  <button
+                    onClick={() =>
+                      setTurns((all) => all.map((x, j) => (j === i ? { ...x, revealed: true } : x)))
+                    }
+                    disabled={Boolean(t.streaming)}
+                    className="plate flex min-h-11 items-center gap-2 rounded-md border-l-[3px] !border-l-safety-500 px-4 py-2.5 text-left transition hover:!border-safety-500/60"
+                  >
+                    {t.streaming ? (
+                      <>
+                        <span className="lamp" />
+                        <span className="stamp !text-denim-400">Composing…</span>
+                      </>
+                    ) : (
+                      <span className="stamp !text-cloth-400">Show the words</span>
+                    )}
+                  </button>
+                ) : (
+                  /* bench plate — orange seam down the left */
+                  <div className="plate rounded-md border-l-[3px] !border-l-safety-500 px-4 py-3">
+                    <div className={`text-[15px] leading-relaxed text-cloth-100 ${t.streaming ? 'caret' : ''}`}>
+                      <Markdown text={displayText(t.text)} />
+                    </div>
                   </div>
-                </div>
-              )}
+                ))}
 
               {t.products?.map((p) => (
                 /* parts-bin label */

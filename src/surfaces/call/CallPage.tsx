@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { streamSSE } from '../../lib/sse'
 import { getAccessToken } from '../../lib/supabase'
-import { startRecording, transcribeBlob, speak, type Recorder } from '../../lib/voice'
+import { startRecording, transcribeBlob, speak, stripForSpeech, type Recorder } from '../../lib/voice'
 import { Avatar, type PersonaState } from '../../lib/persona/Avatar'
 
 /**
@@ -9,17 +9,6 @@ import { Avatar, type PersonaState } from '../../lib/persona/Avatar'
  * and answers out loud (Arabella, en-AU) with live captions. Turn-based v1;
  * the hands-free interruptible build rides on this same surface later.
  */
-
-function stripForSpeech(text: string): string {
-  return text
-    .replace(/<cited>[\s\S]*?(<\/cited>|$)/g, '')
-    .replace(/\*\*([^*]+)\*\*/g, '$1')
-    .replace(/\*([^*\n]+)\*/g, '$1')
-    .replace(/`([^`\n]+)`/g, '$1')
-    .replace(/^[-*]\s+/gm, '')
-    .replace(/^\d+[.)]\s+/gm, '')
-    .trim()
-}
 
 export default function CallPage() {
   const [state, setState] = useState<PersonaState>('idle')

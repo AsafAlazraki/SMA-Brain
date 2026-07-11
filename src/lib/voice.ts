@@ -1,5 +1,17 @@
 import { getAccessToken } from './supabase'
 
+/** Markdown/citations → plain speakable prose. */
+export function stripForSpeech(text: string): string {
+  return text
+    .replace(/<cited>[\s\S]*?(<\/cited>|$)/g, '')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*\n]+)\*/g, '$1')
+    .replace(/`([^`\n]+)`/g, '$1')
+    .replace(/^[-*]\s+/gm, '')
+    .replace(/^\d+[.)]\s+/gm, '')
+    .trim()
+}
+
 /**
  * Client voice helpers — recording (MediaRecorder) and spoken playback.
  * All vendor traffic goes through /api/voice/*; the browser never holds keys.
