@@ -288,6 +288,16 @@ async function queueCards(
   return rows.length
 }
 
+/**
+ * A gap with a pending card shouldn't be re-drafted every run — park it as
+ * queued_for_teach until Tony's verdict. If he approves, the card covers it;
+ * if he rejects, he can re-open it. Prevents duplicate churn.
+ */
+async function parkGap(gapId: string): Promise<void> {
+  if (!isSupabaseConfigured) return
+  await serviceClient().from('knowledge_gaps').update({ status: 'queued_for_teach' }).eq('id', gapId)
+}
+
 // ─── Orchestrator ─────────────────────────────────────────────────────────
 
 /** Is a gap answerable from external facts, or is it SMA-internal (needs Tony)? */
@@ -326,6 +336,7 @@ export async function runLearningCycle(opts: { adminId: string | null; maxGaps?:
         }
         if (checked.length) {
           const n = await queueCards(checked, 'catalog_mining', { gap: g.question, gap_id: g.id, product_ids: products.map((p) => p.id), verified: true }, opts.adminId)
+          await parkGap(g.id)
           results.push({ gap: g.question, route: 'catalog', queued: n })
           continue
         }
@@ -358,6 +369,7 @@ export async function runLearningCycle(opts: { adminId: string | null; maxGaps?:
       if (v.pass) checked.push(c)
     }
     const n = await queueCards(checked, 'autonomous_research', { gap: g.question, gap_id: g.id, sources: web.sources, verified: true }, opts.adminId)
+    if (n) await parkGap(g.id)
     results.push({ gap: g.question, route: n ? 'web' : 'no_result', queued: n, detail: web.sources.slice(0, 3).join(', ') })
   }
 
