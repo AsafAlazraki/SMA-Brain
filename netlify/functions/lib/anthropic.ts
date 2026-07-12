@@ -83,6 +83,12 @@ const ADMIN_TOOLS: Anthropic.Tool[] = [
     description: "List recent questions the brain couldn't answer (open knowledge gaps), so the admin can teach the missing pieces.",
     input_schema: { type: 'object' as const, properties: {} },
   },
+  {
+    name: 'start_learning_run',
+    description:
+      "Kick off an autonomous learning run: the brain works through its open knowledge gaps, mines the catalogue and researches what it can, verifies each finding, and fills the approval queue for the admin to review. Use when the admin says something like 'go learn what you don't know', 'go research the gaps', 'go teach yourself'. It runs in the background (a few minutes) — tell them you've started it and the queue will fill up.",
+    input_schema: { type: 'object' as const, properties: {} },
+  },
 ]
 
 export type Citation = { id: string; title: string }
@@ -104,8 +110,12 @@ export async function runAgent(opts: {
   effort?: 'low' | 'medium' | 'high'
   /** Admin callers get capture_knowledge (teach → approval queue). Set to the user id. */
   captureAsUser?: string | null
+  /** Raw caller JWT — lets admin tools (start_learning_run) trigger background functions as the caller. */
+  callerToken?: string | null
   /** 'fast' runs the ANTHROPIC_MODEL_FAST tier — voice turns need snappy over deep (docs/05 latency budget). */
   tier?: 'main' | 'fast'
+  /** Round 1 MUST call a tool. Fast models skip retrieval when a question "feels" unanswerable — this makes grounding structural, not advisory. */
+  forceToolFirstRound?: boolean
   events: AgentEvents
 }): Promise<{ text: string }> {
   if (isMockLLM) return runMockAgent(opts)
@@ -134,7 +144,11 @@ export async function runAgent(opts: {
       ...(supportsEffort ? { output_config: { effort: opts.effort ?? 'medium' } } : {}),
       system: [{ type: 'text', text: opts.system, cache_control: { type: 'ephemeral' } }],
       tools,
-      ...(finalRound ? { tool_choice: { type: 'none' as const } } : {}),
+      ...(finalRound
+        ? { tool_choice: { type: 'none' as const } }
+        : opts.forceToolFirstRound && round === 0
+          ? { tool_choice: { type: 'any' as const } }
+          : {}),
       messages,
     })
 
@@ -187,6 +201,8 @@ export async function runAgent(opts: {
           )
         } else if (tu.name === 'list_knowledge_gaps' && adminId) {
           resultPayload = await listKnowledgeGaps()
+        } else if (tu.name === 'start_learning_run' && adminId) {
+          resultPayload = await triggerLearningRun(opts.callerToken ?? null)
         } else {
           resultPayload = { error: `unknown tool ${tu.name}` }
         }
@@ -207,6 +223,23 @@ export async function runAgent(opts: {
   return { text: fullText }
 }
 
+/** Fire the background learning function as the calling admin; returns immediately. */
+async function triggerLearningRun(callerToken: string | null): Promise<{ started: boolean; note: string }> {
+  const base = process.env.URL || process.env.DEPLOY_URL
+  if (!base || !callerToken) return { started: false, note: 'cannot reach the background runner from here' }
+  try {
+    // background functions return 202 instantly and keep running up to 15 min
+    await fetch(`${base}/api/research/run`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${callerToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ maxGaps: 8 }),
+    })
+    return { started: true, note: 'learning run started — queue will fill over the next few minutes' }
+  } catch {
+    return { started: false, note: 'could not start the learning run' }
+  }
+}
+
 function toolSummary(name: string, input: Record<string, string>): string {
   if (name === 'search_knowledge') return `Checking the brain: “${input.query ?? ''}”`
   if (name === 'search_products') return `Checking the catalogue: “${input.query ?? ''}”`
@@ -215,6 +248,7 @@ function toolSummary(name: string, input: Record<string, string>): string {
   if (name === 'list_pending_knowledge') return 'Fetching the approval queue'
   if (name === 'review_pending_knowledge') return input.verdict === 'rejected' ? 'Rejecting a card' : 'Approving a card'
   if (name === 'list_knowledge_gaps') return 'Fetching open knowledge gaps'
+  if (name === 'start_learning_run') return 'Starting an autonomous learning run'
   return name
 }
 

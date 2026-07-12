@@ -44,6 +44,13 @@ export default async function handler(req: Request): Promise<Response> {
   // the function sits ~100ms from ElevenLabs; the browser sits ~300ms from us.
   const serverAudio = mode === 'voice' && isVoiceConfigured
 
+  // Anything that isn't pure chit-chat must hit a tool before answering —
+  // the fast model otherwise skips retrieval on questions that "feel"
+  // unanswerable and claims ignorance about things Tony taught it yesterday.
+  const CHITCHAT =
+    /^(g'?day|hi+|hey+|hello+|yo|howdy|thanks?( heaps| mate)?|thank you|cheers( mate)?|ta|no worries|all good|too easy|bye+|see ya|catch ya|later|that's (all|everything)|ok(ay)?|yep|yeah|nah|yes|no)[\s!.,?]*$/i
+  const forceTool = mode === 'voice' && !(message.length < 40 && CHITCHAT.test(message))
+
   // run the agent without blocking the response
   void (async () => {
     sse.send('meta', { conversationId, messageId, serverAudio })
@@ -61,8 +68,10 @@ export default async function handler(req: Request): Promise<Response> {
         // every conversational surface runs the fast tier — TTFT is the product
         // (CLAUDE.md #5); the deep model stays on Draft where prose quality pays
         tier: 'fast',
+        forceToolFirstRound: forceTool,
         // teaching from the call goes to the approval queue — admins only
         captureAsUser: mode === 'voice' && user.role === 'admin' && user.id !== MOCK_USER.id ? user.id : undefined,
+        callerToken: user.role === 'admin' ? (/^Bearer\s+(.+)$/i.exec(req.headers.get('authorization') ?? '')?.[1] ?? null) : null,
         events: {
           onToken: (t) => {
             sse.send('token', { text: t })

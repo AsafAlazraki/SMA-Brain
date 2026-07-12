@@ -33,6 +33,8 @@ const SOURCE_MAP: Record<string, string> = {
   email_edit: 'email_edit',
   email_mining: 'manual',
   staff_suggestion: 'manual',
+  autonomous_research: 'research',
+  catalog_mining: 'catalog',
 }
 
 async function authHeaders(): Promise<Record<string, string>> {
@@ -188,9 +190,12 @@ function QueueSection() {
   return (
     <section className="space-y-3">
       <SectionHeading count={queue?.length}>Approval queue</SectionHeading>
-      <p className="text-[14px] text-cloth-400">
-        Nothing goes live until you approve it. Approve, tweak the wording first, or bin it.
-      </p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-[14px] text-cloth-400">
+          Nothing goes live until you approve it. Approve, tweak the wording first, or bin it.
+        </p>
+        <TeachYourselfButton onQueued={() => void queryClient.invalidateQueries({ queryKey: ['learning_queue'] })} />
+      </div>
       {!isSupabaseConfigured && (
         <p className="stitched rounded-md bg-steel-900/60 p-4 text-sm text-cloth-400">
           No database connected — queue review needs Supabase (README → Local setup).
@@ -213,6 +218,58 @@ function QueueSection() {
         />
       ))}
     </section>
+  )
+}
+
+/**
+ * Kicks the autonomous learning run: the brain works its gaps, mines the
+ * catalogue, researches what it can, verifies every finding, and fills this
+ * queue. Runs in the background — the queue refreshes as cards land.
+ */
+function TeachYourselfButton({ onQueued }: { onQueued: () => void }) {
+  const [state, setState] = useState<'idle' | 'running' | 'error'>('idle')
+  async function run() {
+    if (state === 'running') return
+    setState('running')
+    try {
+      const token = await getAccessToken()
+      const res = await fetch('/api/research/run', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ maxGaps: 8 }),
+      })
+      if (!res.ok && res.status !== 202) throw new Error(String(res.status))
+      // results land over the next few minutes — poll the queue a couple of times
+      const t1 = setTimeout(onQueued, 60_000)
+      const t2 = setTimeout(() => {
+        onQueued()
+        setState('idle')
+      }, 150_000)
+      return () => {
+        clearTimeout(t1)
+        clearTimeout(t2)
+      }
+    } catch {
+      setState('error')
+    }
+  }
+  return (
+    <button
+      onClick={() => void run()}
+      disabled={state === 'running' || !isSupabaseConfigured}
+      title="The brain researches its open gaps and fills the queue for you to approve"
+      className="display flex min-h-11 items-center gap-2 rounded-md bg-safety-500 px-4 text-[15px] tracking-wide text-safety-950 transition hover:brightness-110 active:translate-y-0.5 disabled:opacity-50"
+    >
+      {state === 'running' ? (
+        <>
+          <span className="lamp" /> Learning…
+        </>
+      ) : state === 'error' ? (
+        'Try again'
+      ) : (
+        'Teach yourself'
+      )}
+    </button>
   )
 }
 

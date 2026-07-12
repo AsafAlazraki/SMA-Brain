@@ -17,6 +17,8 @@ const SOURCE_MAP: Record<string, string> = {
   email_edit: 'email_edit',
   email_mining: 'manual',
   staff_suggestion: 'manual',
+  autonomous_research: 'research',
+  catalog_mining: 'catalog',
 }
 
 export type QueueSummary = { id: string; title: string; summary: string; source: string }
