@@ -152,6 +152,13 @@ function AutoLearnedSection() {
           ))}
         </div>
         <span className="stamp !text-cloth-600">{AUTO_MODES.find((m) => m.value === mode)?.hint}</span>
+        <LearnButton
+          onDone={() => void queryClient.invalidateQueries({ queryKey: ['auto_learned'] })}
+          body={{ mode: 'descriptions', limit: 40 }}
+          label="Mine catalogue"
+          busyLabel="Mining…"
+          secondary
+        />
       </div>
 
       {cards?.length === 0 && <p className="text-sm text-cloth-600">Nothing self-taught yet — hit “Teach yourself” above or say “go learn” on a call.</p>}
@@ -336,7 +343,12 @@ function QueueSection() {
         <p className="text-[14px] text-cloth-400">
           Nothing goes live until you approve it. Approve, tweak the wording first, or bin it.
         </p>
-        <TeachYourselfButton onQueued={() => void queryClient.invalidateQueries({ queryKey: ['learning_queue'] })} />
+        <LearnButton
+          onDone={() => void queryClient.invalidateQueries({ queryKey: ['learning_queue'] })}
+          body={{ maxGaps: 8 }}
+          label="Teach yourself"
+          busyLabel="Learning…"
+        />
       </div>
       {!isSupabaseConfigured && (
         <p className="stitched rounded-md bg-steel-900/60 p-4 text-sm text-cloth-400">
@@ -364,11 +376,10 @@ function QueueSection() {
 }
 
 /**
- * Kicks the autonomous learning run: the brain works its gaps, mines the
- * catalogue, researches what it can, verifies every finding, and fills this
- * queue. Runs in the background — the queue refreshes as cards land.
+ * Kicks an autonomous learning run in the background (gaps or catalogue
+ * description mining). Results land over the next few minutes; onDone refreshes.
  */
-function TeachYourselfButton({ onQueued }: { onQueued: () => void }) {
+function LearnButton({ onDone, body, label, busyLabel, secondary }: { onDone: () => void; body: Record<string, unknown>; label: string; busyLabel: string; secondary?: boolean }) {
   const [state, setState] = useState<'idle' | 'running' | 'error'>('idle')
   async function run() {
     if (state === 'running') return
@@ -378,19 +389,14 @@ function TeachYourselfButton({ onQueued }: { onQueued: () => void }) {
       const res = await fetch('/api/research/run', {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ maxGaps: 8 }),
+        body: JSON.stringify(body),
       })
       if (!res.ok && res.status !== 202) throw new Error(String(res.status))
-      // results land over the next few minutes — poll the queue a couple of times
-      const t1 = setTimeout(onQueued, 60_000)
-      const t2 = setTimeout(() => {
-        onQueued()
+      setTimeout(onDone, 60_000)
+      setTimeout(() => {
+        onDone()
         setState('idle')
       }, 150_000)
-      return () => {
-        clearTimeout(t1)
-        clearTimeout(t2)
-      }
     } catch {
       setState('error')
     }
@@ -399,17 +405,18 @@ function TeachYourselfButton({ onQueued }: { onQueued: () => void }) {
     <button
       onClick={() => void run()}
       disabled={state === 'running' || !isSupabaseConfigured}
-      title="The brain researches its open gaps and fills the queue for you to approve"
-      className="display flex min-h-11 items-center gap-2 rounded-md bg-safety-500 px-4 text-[15px] tracking-wide text-safety-950 transition hover:brightness-110 active:translate-y-0.5 disabled:opacity-50"
+      className={`display flex min-h-11 items-center gap-2 rounded-md px-4 text-[15px] tracking-wide transition active:translate-y-0.5 disabled:opacity-50 ${
+        secondary ? 'border border-safety-500/60 text-safety-400 hover:bg-safety-500/10' : 'bg-safety-500 text-safety-950 hover:brightness-110'
+      }`}
     >
       {state === 'running' ? (
         <>
-          <span className="lamp" /> Learning…
+          <span className="lamp" /> {busyLabel}
         </>
       ) : state === 'error' ? (
         'Try again'
       ) : (
-        'Teach yourself'
+        label
       )}
     </button>
   )

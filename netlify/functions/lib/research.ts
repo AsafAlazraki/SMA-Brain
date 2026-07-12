@@ -213,6 +213,98 @@ async function researchWeb(gap: string): Promise<{ available: boolean; findings:
   }
 }
 
+/**
+ * Mine the catalogue's own product DESCRIPTIONS into knowledge cards. This is
+ * the richest owned, zero-web ground truth we have — SMA's scraped product
+ * copy (working space, foot height, what each machine is for). Cards are
+ * grounded strictly in the product's own description + row facts, verified
+ * against that same text, and landed per the auto-approve policy.
+ */
+export async function runDescriptionMining(opts: { adminId: string | null; limit?: number; offset?: number }): Promise<{
+  autoApprove: AutoApproveMode
+  processed: number
+  totalLive: number
+  totalQueued: number
+  skipped: number
+}> {
+  const mode = await autoApproveMode()
+  if (!isSupabaseConfigured || isMockLLM) return { autoApprove: mode, processed: 0, totalLive: 0, totalQueued: 0, skipped: 0 }
+  const db = serviceClient()
+  // distinct machines with substantial copy, richest first; dedup by model in JS
+  const { data } = await db
+    .from('products')
+    .select('id, brand, model, name, category, price_ex_gst, url, description')
+    .not('description', 'is', null)
+    .order('description', { ascending: false })
+    .limit(600)
+  const rows = (data ?? []).filter((p) => (p.description as string)?.length > 120)
+  const seen = new Set<string>()
+  const unique = rows.filter((p) => {
+    const key = `${p.brand}|${p.model}`.toLowerCase()
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+  const batch = unique.slice(opts.offset ?? 0, (opts.offset ?? 0) + (opts.limit ?? 40))
+
+  let live = 0
+  let queued = 0
+  let skipped = 0
+  let processed = 0
+  for (const p of batch) {
+    processed++
+    const label = `${p.brand ?? ''} ${p.model ?? ''}`.trim()
+    // already covered by a card that names this model? skip
+    const existing = await searchKnowledge(`${label} ${p.name}`, 3)
+    if (existing.some((h) => h.score >= 0.6 && new RegExp(String(p.model ?? '').replace(/[^\w-]/g, ''), 'i').test(h.content.replace(/[^\w-]/g, '')))) {
+      skipped++
+      continue
+    }
+    const cards = await draftFromDescription(p as ProductRow)
+    if (!cards.length) continue
+    const evidence = `${label} ${p.name} [${p.category}]${p.price_ex_gst ? ` $${p.price_ex_gst} ex GST` : ''}\n${p.description}`
+    const checked: DraftCard[] = []
+    for (const c of cards) {
+      const v = await verifyCard(c, evidence)
+      if (v.pass) checked.push(c)
+    }
+    const landed = await landCards(checked, 'catalog', mode, { product_id: p.id, model: p.model, url: p.url, source_kind: 'description', verified: true }, opts.adminId)
+    live += landed.live
+    queued += landed.queued
+  }
+  return { autoApprove: mode, processed, totalLive: live, totalQueued: queued, skipped }
+}
+
+type ProductRow = { brand: string | null; model: string | null; name: string; category: string | null; price_ex_gst: number | null; url: string | null; description: string }
+
+async function draftFromDescription(p: ProductRow): Promise<DraftCard[]> {
+  const res = await client().messages.create({
+    model: MAIN(),
+    max_tokens: 1400,
+    system: [
+      {
+        type: 'text' as const,
+        text: [
+          `You write knowledge cards for Sewing Machines Australia (SMA) staff from a single product's own catalogue description.`,
+          `HARD RULE: use ONLY facts stated in the description and the row (model, category, price). Never add specs, needle systems, or claims not in the text. If the description is marketing fluff with no usable facts, return an empty cards array.`,
+          `Write 1-2 cards: what the machine is and what it's built for; and if the description gives concrete specs/features (arm length, foot height, feed type, applications), a specs card. Title ≤ 90 chars, include the model verbatim. Tags 2-5 kebab-case. visibility "internal".`,
+          `Australian English. Plain, factual, no marketing adjectives.`,
+        ].join('\n'),
+        cache_control: { type: 'ephemeral' as const },
+      },
+    ],
+    output_config: { format: { type: 'json_schema' as const, schema: CARD_SCHEMA } },
+    messages: [
+      {
+        role: 'user',
+        content: `PRODUCT: ${p.brand ?? ''} ${p.model ?? ''} — ${p.name}\nCATEGORY: ${p.category ?? ''}\n${p.price_ex_gst ? `PRICE: $${p.price_ex_gst} ex GST\n` : ''}\nSMA DESCRIPTION:\n${p.description.slice(0, 2000)}`,
+      },
+    ],
+  })
+  const text = res.content.find((b) => b.type === 'text')?.text ?? ''
+  return safeParse<{ cards?: DraftCard[] }>(text)?.cards?.filter((c) => c.title && c.content) ?? []
+}
+
 /** Turn sourced web findings into cards (structured, fast tier). */
 async function draftFromFindings(gap: string, findings: string, sources: string[]): Promise<DraftCard[]> {
   if (!findings.trim() || isMockLLM) return []
