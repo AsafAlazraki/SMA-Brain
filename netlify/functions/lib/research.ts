@@ -254,9 +254,14 @@ export async function runDescriptionMining(opts: { adminId: string | null; limit
   for (const p of batch) {
     processed++
     const label = `${p.brand ?? ''} ${p.model ?? ''}`.trim()
-    // already covered by a card that names this model? skip
-    const existing = await searchKnowledge(`${label} ${p.name}`, 3)
-    if (existing.some((h) => h.score >= 0.6 && new RegExp(String(p.model ?? '').replace(/[^\w-]/g, ''), 'i').test(h.content.replace(/[^\w-]/g, '')))) {
+    // already mined this exact product? skip. Precise provenance check — the
+    // FTS-only retrieval scores are ~uniform (no embeddings yet), so a score
+    // threshold can't be trusted for "already covered".
+    const { count: already } = await db
+      .from('knowledge_entries')
+      .select('id', { count: 'exact', head: true })
+      .contains('provenance', { product_id: p.id })
+    if (already && already > 0) {
       skipped++
       continue
     }
