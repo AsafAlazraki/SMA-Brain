@@ -63,8 +63,150 @@ export default function AdminPage() {
     <div className="mx-auto h-full max-w-3xl space-y-9 overflow-y-auto p-4 pb-12">
       <BlurtSection />
       <QueueSection />
+      <AutoLearnedSection />
       <GapsSection />
       <UsersSection />
+    </div>
+  )
+}
+
+type AutoCard = { id: string; title: string; content: string; source: string; provenance: Record<string, unknown> | null; created_at: string }
+const AUTO_MODES: { value: string; label: string; hint: string }[] = [
+  { value: 'off', label: 'Off', hint: 'everything waits in the queue' },
+  { value: 'catalog', label: 'Catalogue', hint: 'catalogue-grounded cards go live' },
+  { value: 'external', label: '+ Web', hint: 'catalogue + web research go live' },
+  { value: 'all', label: 'All', hint: 'anything verified goes live' },
+]
+
+/* ── Taught itself: auto-published cards Tony can correct or pull ─────────── */
+
+function AutoLearnedSection() {
+  const queryClient = useQueryClient()
+
+  const { data: mode } = useQuery({
+    queryKey: ['auto_approve_mode'],
+    enabled: isSupabaseConfigured,
+    queryFn: async () => {
+      const { data } = await supabase!.from('app_settings').select('auto_approve_mode').eq('id', 1).maybeSingle()
+      return (data?.auto_approve_mode as string) ?? 'off'
+    },
+  })
+  const setMode = useMutation({
+    mutationFn: async (m: string) => {
+      const { error } = await supabase!.from('app_settings').update({ auto_approve_mode: m }).eq('id', 1)
+      if (error) throw error
+    },
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['auto_approve_mode'] }),
+  })
+
+  const { data: cards } = useQuery({
+    queryKey: ['auto_learned'],
+    enabled: isSupabaseConfigured,
+    queryFn: async (): Promise<AutoCard[]> => {
+      const { data, error } = await supabase!
+        .from('knowledge_entries')
+        .select('id, title, content, source, provenance, created_at')
+        .is('approved_by', null)
+        .in('source', ['catalog', 'research'])
+        .eq('status', 'approved')
+        .order('created_at', { ascending: false })
+        .limit(40)
+      if (error) throw error
+      return data as AutoCard[]
+    },
+  })
+
+  const correct = useMutation({
+    mutationFn: async (args: { id: string; action: 'save' | 'pull'; title?: string; content?: string }) => {
+      if (args.action === 'pull') {
+        const { error } = await supabase!.from('knowledge_entries').delete().eq('id', args.id)
+        if (error) throw error
+      } else {
+        const { error } = await supabase!.from('knowledge_entries').update({ title: args.title, content: args.content }).eq('id', args.id)
+        if (error) throw error
+      }
+    },
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['auto_learned'] }),
+  })
+
+  return (
+    <section className="space-y-3">
+      <SectionHeading count={cards?.length}>Taught itself</SectionHeading>
+      <p className="text-[14px] text-cloth-400">
+        The brain researches, verifies and publishes these on its own — no wait for you. Skim them, fix any wording, or pull
+        anything that's off. SMA prices &amp; policies never auto-publish; they stay in the queue above.
+      </p>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="stamp !text-cloth-500">Auto-publish:</span>
+        <div className="flex items-center rounded-md border border-steel-700 p-0.5">
+          {AUTO_MODES.map((m) => (
+            <button
+              key={m.value}
+              onClick={() => setMode.mutate(m.value)}
+              title={m.hint}
+              className={`stamp min-h-9 rounded px-2.5 transition ${mode === m.value ? 'bg-safety-500 !text-safety-950' : '!text-cloth-400 hover:!text-cloth-100'}`}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+        <span className="stamp !text-cloth-600">{AUTO_MODES.find((m) => m.value === mode)?.hint}</span>
+      </div>
+
+      {cards?.length === 0 && <p className="text-sm text-cloth-600">Nothing self-taught yet — hit “Teach yourself” above or say “go learn” on a call.</p>}
+      {cards?.map((c) => (
+        <AutoCardRow key={c.id} card={c} busy={correct.isPending} onCorrect={(action, edits) => correct.mutate({ id: c.id, action, ...edits })} />
+      ))}
+    </section>
+  )
+}
+
+function AutoCardRow({ card, busy, onCorrect }: { card: AutoCard; busy: boolean; onCorrect: (action: 'save' | 'pull', edits?: { title: string; content: string }) => void }) {
+  const [editing, setEditing] = useState(false)
+  const [title, setTitle] = useState(card.title)
+  const [content, setContent] = useState(card.content)
+  const prov = card.provenance ?? {}
+  const evidence = Array.isArray(prov.sources)
+    ? `${(prov.sources as string[]).length} source${(prov.sources as string[]).length === 1 ? '' : 's'}`
+    : Array.isArray(prov.product_ids)
+      ? `${(prov.product_ids as string[]).length} catalogue rows`
+      : 'verified'
+
+  return (
+    <div className="stitched space-y-2 rounded-md bg-steel-900/50 p-3">
+      <div className="flex items-start justify-between gap-2">
+        {editing ? (
+          <input value={title} onChange={(e) => setTitle(e.target.value)} className="field w-full p-2 text-[15px]" />
+        ) : (
+          <h3 className="text-[15px] font-semibold text-cloth-100">{card.title}</h3>
+        )}
+        <span className={`stamp shrink-0 rounded-sm border px-1.5 py-0.5 ${card.source === 'research' ? 'border-denim-500 !text-denim-300' : 'border-go-500/60 !text-go-500'}`}>
+          {card.source === 'research' ? 'web' : 'catalogue'}
+        </span>
+      </div>
+      {editing ? (
+        <textarea value={content} onChange={(e) => setContent(e.target.value)} rows={4} className="field w-full resize-y p-2 text-[14px]" />
+      ) : (
+        <p className="text-[14px] leading-relaxed text-cloth-300">{card.content}</p>
+      )}
+      <div className="flex items-center justify-between">
+        <span className="stamp !text-cloth-600">✓ {evidence}</span>
+        <div className="flex items-center gap-1.5">
+          {editing ? (
+            <button onClick={() => onCorrect('save', { title, content })} disabled={busy} className="stamp min-h-9 rounded bg-safety-500 px-3 !text-safety-950">
+              Save
+            </button>
+          ) : (
+            <button onClick={() => setEditing(true)} className="stamp min-h-9 rounded border border-steel-700 px-3 !text-cloth-300 hover:!text-cloth-100">
+              Correct
+            </button>
+          )}
+          <button onClick={() => onCorrect('pull')} disabled={busy} className="stamp min-h-9 rounded border border-stop-500/60 px-3 !text-stop-500 hover:bg-stop-500/10">
+            Pull
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

@@ -28,20 +28,38 @@ export function PortraitAvatar({
     let raf = 0
     let nextBlink = performance.now() + 1800
     let blinkStart = 0
-    let mouthOpen = false
-    let mouthChangedAt = 0
-    let env = 0 // amplitude envelope — fast attack, slow release
+    let env = 0 // smoothed amplitude envelope (attack/release follower)
+    let openState = 0 // 0..1 current mouth openness (eased toward target)
+    let lastT = performance.now()
 
     const tick = (now: number) => {
       const t = now / 1000
+      const dt = Math.min(50, now - lastT) / 16.67 // frames elapsed (~1 at 60fps)
+      lastT = now
       const s = stateRef.current
       const level = levelRef.current
 
+      // ── envelope follower: quick to rise on a syllable, slower to fall ──
+      const target = s === 'speaking' ? level : 0
+      const k = target > env ? 0.55 : 0.16
+      env += (target - env) * Math.min(1, k * dt)
+
+      // ── openness: proportional, not on/off. normalise the useful band and
+      // smoothstep it so soft sounds barely part the lips and loud vowels
+      // open wide — the graded range is what kills the puppet look ──
+      const x = Math.max(0, Math.min(1, (env - 0.05) / 0.42))
+      const targetOpen = s === 'speaking' ? x * x * (3 - 2 * x) : 0
+      // ease the visible openness so per-frame audio jitter never twitches it
+      openState += (targetOpen - openState) * Math.min(1, 0.5 * dt)
+      const open = openState < 0.02 ? 0 : openState
+
       const breathe = Math.sin(t * 1.4) * 0.55
-      const sway = s === 'speaking' ? Math.sin(t * 2.1) * 0.8 + level * 0.7 : Math.sin(t * 0.7) * 0.3
+      const sway = s === 'speaking' ? Math.sin(t * 2.1) * 0.6 : Math.sin(t * 0.7) * 0.3
       const tilt = s === 'listening' ? 2.2 : s === 'thinking' ? -1.2 : 0
+      // subtle jaw/head drop with openness sells the talk even between mouth frames
+      const jaw = open * 0.9
       if (frameRef.current) {
-        frameRef.current.style.transform = `translateY(${breathe.toFixed(2)}%) rotate(${(sway + tilt).toFixed(2)}deg) scale(${(1.015 + Math.sin(t * 1.4) * 0.004).toFixed(4)})`
+        frameRef.current.style.transform = `translateY(${(breathe + jaw).toFixed(2)}%) rotate(${(sway + tilt).toFixed(2)}deg) scale(${(1.015 + Math.sin(t * 1.4) * 0.004).toFixed(4)})`
       }
 
       if (now >= nextBlink && blinkStart === 0) {
@@ -58,25 +76,14 @@ export function PortraitAvatar({
       }
       if (eyesRef.current) eyesRef.current.style.opacity = lidsDown ? '1' : '0'
 
-      // mouth: 2-frame flap driven by a smoothed envelope, not raw RMS —
-      // instantaneous level dips mid-vowel caused spurious snaps (looked
-      // clacky). Fast attack / slow release + long holds ≈ syllable rate.
-      env = level > env ? level : env * 0.9
-      if (s === 'speaking') {
-        if (mouthOpen) {
-          if (env < 0.06 && now - mouthChangedAt > 160) {
-            mouthOpen = false
-            mouthChangedAt = now
-          }
-        } else if (env > 0.15 && now - mouthChangedAt > 90) {
-          mouthOpen = true
-          mouthChangedAt = now
-        }
-      } else {
-        mouthOpen = false
-        env = 0
+      // mouth: reveal the open-mouth frame proportionally to openness, and
+      // stretch it down a touch from the top lip so it reads as a jaw drop,
+      // not a decal fading in. Opacity capped below 1 so the neutral lips
+      // always ground it (avoids the doubled-mouth ghost of a full crossfade).
+      if (mouthRef.current) {
+        mouthRef.current.style.opacity = (open * 0.96).toFixed(3)
+        mouthRef.current.style.transform = `scaleY(${(0.72 + open * 0.5).toFixed(3)})`
       }
-      if (mouthRef.current) mouthRef.current.style.opacity = mouthOpen ? '1' : '0'
 
       if (ringRef.current) {
         if (s === 'listening') {
@@ -125,8 +132,9 @@ export function PortraitAvatar({
         <div ref={frameRef} className="relative h-full w-full will-change-transform">
           <img src={PORTRAIT.base} alt="" className="h-full w-full object-cover" draggable={false} />
           <div ref={eyesRef} style={region(PORTRAIT.eyes, PORTRAIT.eyesClosed)} aria-hidden />
-          {/* 70ms micro-fade: softens the snap without the ghosting of long crossfades */}
-          <div ref={mouthRef} style={{ ...region(PORTRAIT.mouth, PORTRAIT.mouthOpen), transition: 'opacity 70ms linear' }} aria-hidden />
+          {/* mouth: openness driven per-frame (opacity + scaleY jaw drop from the
+              top lip). No CSS transition — the rAF envelope already smooths it. */}
+          <div ref={mouthRef} style={{ ...region(PORTRAIT.mouth, PORTRAIT.mouthOpen), transformOrigin: 'top center', willChange: 'opacity, transform' }} aria-hidden />
         </div>
       </div>
     </div>

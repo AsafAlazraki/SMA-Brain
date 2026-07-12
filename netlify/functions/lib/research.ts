@@ -34,7 +34,14 @@ export type QueuedResult = {
   gap: string
   route: 'resolved' | 'catalog' | 'web' | 'needs_tony' | 'web_unavailable' | 'no_result'
   queued: number
+  live?: number
   detail?: string
+}
+
+/** Auto-approved gap is now covered by a live card → close it. */
+async function answerGap(gapId: string): Promise<void> {
+  if (!isSupabaseConfigured) return
+  await serviceClient().from('knowledge_gaps').update({ status: 'answered' }).eq('id', gapId)
 }
 
 function client(): Anthropic {
@@ -298,6 +305,70 @@ async function parkGap(gapId: string): Promise<void> {
   await serviceClient().from('knowledge_gaps').update({ status: 'queued_for_teach' }).eq('id', gapId)
 }
 
+export type AutoApproveMode = 'off' | 'catalog' | 'external' | 'all'
+
+/** Current auto-approve policy (app_settings). Defaults conservative if unset. */
+async function autoApproveMode(): Promise<AutoApproveMode> {
+  if (!isSupabaseConfigured) return 'off'
+  const { data } = await serviceClient().from('app_settings').select('auto_approve_mode').eq('id', 1).maybeSingle()
+  const m = data?.auto_approve_mode as AutoApproveMode | undefined
+  return m ?? 'off'
+}
+
+/** Does this route's verified card auto-publish, or wait in the queue? */
+function shouldAutoApprove(mode: AutoApproveMode, route: 'catalog' | 'web'): boolean {
+  if (mode === 'all') return true
+  if (mode === 'external') return route === 'catalog' || route === 'web'
+  if (mode === 'catalog') return route === 'catalog'
+  return false
+}
+
+/**
+ * Publish verified cards straight to the live knowledge base (status approved,
+ * approved_by null = taught itself, no human). Evidence in provenance so Tony
+ * can review + correct. Only ever called for verifier-cleared cards.
+ */
+async function autoApproveCards(
+  cards: DraftCard[],
+  source: 'catalog' | 'research',
+  provenance: Record<string, unknown>,
+  createdBy: string | null,
+): Promise<number> {
+  if (cards.length === 0 || !isSupabaseConfigured) return cards.length
+  const rows = cards.map((c) => ({
+    title: c.title.slice(0, 200),
+    content: c.content,
+    tags: (c.tags ?? []).slice(0, 8),
+    visibility: c.visibility === 'public' ? 'public' : 'internal',
+    status: 'approved',
+    source,
+    created_by: createdBy,
+    approved_by: null, // no human — the verifier is the gate; Tony corrects after
+    approved_at: new Date().toISOString(),
+    provenance: { ...provenance, auto_approved: true },
+  }))
+  const { error } = await serviceClient().from('knowledge_entries').insert(rows)
+  if (error) throw new Error(`auto-approve insert failed: ${error.message}`)
+  return rows.length
+}
+
+/** Publish OR queue verified cards per the auto-approve policy. Returns {live, queued}. */
+async function landCards(
+  cards: DraftCard[],
+  route: 'catalog' | 'web',
+  mode: AutoApproveMode,
+  provenance: Record<string, unknown>,
+  adminId: string | null,
+): Promise<{ live: number; queued: number }> {
+  if (cards.length === 0) return { live: 0, queued: 0 }
+  if (shouldAutoApprove(mode, route)) {
+    const live = await autoApproveCards(cards, route === 'catalog' ? 'catalog' : 'research', provenance, adminId)
+    return { live, queued: 0 }
+  }
+  const queued = await queueCards(cards, route === 'catalog' ? 'catalog_mining' : 'autonomous_research', provenance, adminId)
+  return { live: 0, queued }
+}
+
 // ─── Orchestrator ─────────────────────────────────────────────────────────
 
 /** Is a gap answerable from external facts, or is it SMA-internal (needs Tony)? */
@@ -315,7 +386,10 @@ export async function runLearningCycle(opts: { adminId: string | null; maxGaps?:
   results: QueuedResult[]
   webSearch: 'used' | 'unavailable' | 'not_needed'
   totalQueued: number
+  totalLive: number
+  autoApprove: AutoApproveMode
 }> {
+  const mode = await autoApproveMode()
   const { resolved, open } = await resolveGaps()
   const gaps = open.slice(0, opts.maxGaps ?? 6)
   const results: QueuedResult[] = []
@@ -335,9 +409,10 @@ export async function runLearningCycle(opts: { adminId: string | null; maxGaps?:
           if (v.pass) checked.push(c)
         }
         if (checked.length) {
-          const n = await queueCards(checked, 'catalog_mining', { gap: g.question, gap_id: g.id, product_ids: products.map((p) => p.id), verified: true }, opts.adminId)
-          await parkGap(g.id)
-          results.push({ gap: g.question, route: 'catalog', queued: n })
+          const { live, queued } = await landCards(checked, 'catalog', mode, { gap: g.question, gap_id: g.id, product_ids: products.map((p) => p.id), verified: true }, opts.adminId)
+          if (live) await answerGap(g.id)
+          else if (queued) await parkGap(g.id)
+          results.push({ gap: g.question, route: 'catalog', queued, live })
           continue
         }
       }
@@ -368,15 +443,61 @@ export async function runLearningCycle(opts: { adminId: string | null; maxGaps?:
       const v = await verifyCard(c, evidence)
       if (v.pass) checked.push(c)
     }
-    const n = await queueCards(checked, 'autonomous_research', { gap: g.question, gap_id: g.id, sources: web.sources, verified: true }, opts.adminId)
-    if (n) await parkGap(g.id)
-    results.push({ gap: g.question, route: n ? 'web' : 'no_result', queued: n, detail: web.sources.slice(0, 3).join(', ') })
+    const { live, queued } = await landCards(checked, 'web', mode, { gap: g.question, gap_id: g.id, sources: web.sources, verified: true }, opts.adminId)
+    if (live) await answerGap(g.id)
+    else if (queued) await parkGap(g.id)
+    results.push({ gap: g.question, route: live || queued ? 'web' : 'no_result', queued, live, detail: web.sources.slice(0, 3).join(', ') })
   }
 
   return {
     resolved,
     results,
     totalQueued: results.reduce((s, r) => s + r.queued, 0),
+    totalLive: results.reduce((s, r) => s + (r.live ?? 0), 0),
+    autoApprove: mode,
     webSearch: webUsed ? 'used' : webTried ? 'unavailable' : 'not_needed',
+  }
+}
+
+/**
+ * Broad pre-launch teaching sweep: mine the catalogue across a list of topics
+ * (machine categories + common jobs), verify, and land each per the
+ * auto-approve policy. Front-loads real knowledge before Tony goes live.
+ * Bounded; skips a topic already well covered so it doesn't pile on duplicates.
+ */
+export async function runCatalogSweep(opts: { adminId: string | null; topics: string[] }): Promise<{
+  autoApprove: AutoApproveMode
+  totalLive: number
+  totalQueued: number
+  perTopic: { topic: string; live: number; queued: number; skipped?: boolean }[]
+}> {
+  const mode = await autoApproveMode()
+  const perTopic: { topic: string; live: number; queued: number; skipped?: boolean }[] = []
+  for (const topic of opts.topics) {
+    // already well covered? skip — don't duplicate existing knowledge
+    const existing = await searchKnowledge(topic, 3)
+    if (existing.some((h) => h.score >= 0.55 && h.content.length > 140)) {
+      perTopic.push({ topic, live: 0, queued: 0, skipped: true })
+      continue
+    }
+    const { cards, products } = await draftFromCatalog(topic)
+    if (!cards.length || !products.length) {
+      perTopic.push({ topic, live: 0, queued: 0 })
+      continue
+    }
+    const evidence = products.map((p) => `${p.brand} ${p.model} ${p.name} [${p.category}]${p.price_ex_gst ? ` $${p.price_ex_gst}` : ''}`).join('\n')
+    const checked: DraftCard[] = []
+    for (const c of cards) {
+      const v = await verifyCard(c, evidence)
+      if (v.pass) checked.push(c)
+    }
+    const { live, queued } = await landCards(checked, 'catalog', mode, { topic, product_ids: products.map((p) => p.id), verified: true, sweep: true }, opts.adminId)
+    perTopic.push({ topic, live, queued })
+  }
+  return {
+    autoApprove: mode,
+    totalLive: perTopic.reduce((s, r) => s + r.live, 0),
+    totalQueued: perTopic.reduce((s, r) => s + r.queued, 0),
+    perTopic,
   }
 }
