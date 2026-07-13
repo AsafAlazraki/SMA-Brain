@@ -29,7 +29,7 @@ Progress (2026-07-10):
 - [x] Role-aware routing: Admin tab/route only for admins (`RequireAuth`/`RequireAdmin` guards)
 - [x] Shared auth middleware on all `/api/*` functions (`netlify/functions/lib/auth.ts`); mock mode still key-free
 - [x] Tests written: middleware units (green) + RLS fixtures & endpoint-guard integration suites
-- [x] **Acceptance demonstrated in production (2026-07-11)** — https://sma-tonys-brain.netlify.app:
+- [x] **Acceptance demonstrated in production (2026-07-11)** — https://sma-the-brain.netlify.app:
       Tony (admin) + staff log in; staff sees no Admin nav and /admin bounces; /api/admin/users
       serves admins only; chat streams real grounded answers (Fable 5 + hosted retrieval).
       Found & fixed live: GoTrue merges app_metadata AFTER insert, so the 0002 trigger can't

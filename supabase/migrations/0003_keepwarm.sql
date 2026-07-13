@@ -10,17 +10,17 @@ create extension if not exists pg_net;
 select cron.schedule(
   'keepwarm-chat',
   '*/4 * * * *',
-  $$select net.http_get('https://sma-tonys-brain.netlify.app/api/chat')$$
+  $$select net.http_get('https://sma-the-brain.netlify.app/api/chat')$$
 );
 
 select cron.schedule(
   'keepwarm-stt',
   '*/4 * * * *',
-  $$select net.http_get('https://sma-tonys-brain.netlify.app/api/voice/stt')$$
+  $$select net.http_get('https://sma-the-brain.netlify.app/api/voice/stt')$$
 );
 
 select cron.schedule(
   'keepwarm-tts',
   '*/4 * * * *',
-  $$select net.http_get('https://sma-tonys-brain.netlify.app/api/voice/tts')$$
+  $$select net.http_get('https://sma-the-brain.netlify.app/api/voice/tts')$$
 );
