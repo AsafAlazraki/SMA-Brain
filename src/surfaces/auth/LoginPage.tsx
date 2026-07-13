@@ -41,7 +41,7 @@ export default function LoginPage() {
       <div className="w-full max-w-sm pb-10">
         <div className="rise mb-2 text-center">
           <h1 className="display text-[44px] leading-none text-cloth-100">
-            Tony's <span className="text-safety-500">Brain</span>
+            The <span className="text-safety-500">Brain</span>
           </h1>
         </div>
         <p className="rise rise-1 stamp mb-8 text-center !text-cloth-400">

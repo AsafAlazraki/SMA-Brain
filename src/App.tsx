@@ -22,7 +22,7 @@ export default function App() {
           <div className="mx-auto flex max-w-5xl items-center justify-between gap-2 px-4 pt-3 pb-2">
             <div className="min-w-0">
               <span className="display block text-xl leading-none text-cloth-100">
-                Tony's <span className="text-safety-500">Brain</span>
+                The <span className="text-safety-500">Brain</span>
               </span>
               <span className="stamp hidden sm:block">Sewing Machines Australia</span>
             </div>
