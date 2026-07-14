@@ -34,6 +34,11 @@ export async function synthesize(text: string, previousText?: string): Promise<A
 export async function transcribe(audio: ArrayBuffer, mimeType: string): Promise<string> {
   const form = new FormData()
   form.append('model_id', 'scribe_v1')
+  // PIN to English — without this Scribe auto-detects language and mis-fires on
+  // Australian-accented speech (was transcribing Tony as Chinese). ISO-639.
+  form.append('language_code', 'eng')
+  // no non-speech event tags cluttering the transcript ("[laughter]" etc.)
+  form.append('tag_audio_events', 'false')
   form.append('file', new Blob([audio], { type: mimeType }), 'audio')
   const res = await fetch(`${API}/speech-to-text`, {
     method: 'POST',

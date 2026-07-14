@@ -3,10 +3,12 @@ import type { PersonaState } from './Avatar'
 import { PORTRAIT } from './portrait-config'
 
 /**
- * 2.5D portrait rig — a real portrait image brought to life: breathes, sways,
- * tilts to listen, blinks (eye-region crossfade to the eyes-closed variant)
- * and speaks (mouth-region crossfade to the mouth-open variant, driven by
- * live TTS amplitude). Regions are soft-masked so seams vanish.
+ * 2.5D portrait rig — a real portrait brought to life with the calm, reliable
+ * cues only: breathes, sways gently, tilts to listen, and blinks (snap swap to
+ * the eyes-closed variant). NO lip-sync — photo mouth-swapping on two stills
+ * always read as a puppet, so she simply keeps her natural smile and blinks
+ * while she talks (Asaf's call, 2026-07-13). A soft glow marks speaking so
+ * she still feels alive without the mouth.
  */
 export function PortraitAvatar({
   state,
@@ -19,7 +21,6 @@ export function PortraitAvatar({
 }) {
   const frameRef = useRef<HTMLDivElement | null>(null)
   const eyesRef = useRef<HTMLDivElement | null>(null)
-  const mouthRef = useRef<HTMLDivElement | null>(null)
   const ringRef = useRef<HTMLDivElement | null>(null)
   const stateRef = useRef<PersonaState>(state)
   stateRef.current = state
@@ -28,46 +29,25 @@ export function PortraitAvatar({
     let raf = 0
     let nextBlink = performance.now() + 1800
     let blinkStart = 0
-    let env = 0 // smoothed amplitude envelope (attack/release follower)
-    let openState = 0 // 0..1 current mouth openness (eased toward target)
-    let lastT = performance.now()
 
     const tick = (now: number) => {
       const t = now / 1000
-      const dt = Math.min(50, now - lastT) / 16.67 // frames elapsed (~1 at 60fps)
-      lastT = now
       const s = stateRef.current
       const level = levelRef.current
 
-      // ── envelope follower: quick to rise on a syllable, slower to fall ──
-      const target = s === 'speaking' ? level : 0
-      const k = target > env ? 0.55 : 0.16
-      env += (target - env) * Math.min(1, k * dt)
-
-      // ── openness: proportional, not on/off. normalise the useful band and
-      // smoothstep it so soft sounds barely part the lips and loud vowels
-      // open wide — the graded range is what kills the puppet look ──
-      const x = Math.max(0, Math.min(1, (env - 0.05) / 0.42))
-      const targetOpen = s === 'speaking' ? x * x * (3 - 2 * x) : 0
-      // ease the visible openness so per-frame audio jitter never twitches it
-      openState += (targetOpen - openState) * Math.min(1, 0.5 * dt)
-      const open = openState < 0.02 ? 0 : openState
-
       const breathe = Math.sin(t * 1.4) * 0.55
-      const sway = s === 'speaking' ? Math.sin(t * 2.1) * 0.6 : Math.sin(t * 0.7) * 0.3
+      // a touch more life while she's talking, calm otherwise — no mouth motion
+      const sway = s === 'speaking' ? Math.sin(t * 2.0) * 0.7 : Math.sin(t * 0.7) * 0.3
       const tilt = s === 'listening' ? 2.2 : s === 'thinking' ? -1.2 : 0
-      // subtle jaw/head drop with openness sells the talk even between mouth frames
-      const jaw = open * 0.9
       if (frameRef.current) {
-        frameRef.current.style.transform = `translateY(${(breathe + jaw).toFixed(2)}%) rotate(${(sway + tilt).toFixed(2)}deg) scale(${(1.015 + Math.sin(t * 1.4) * 0.004).toFixed(4)})`
+        frameRef.current.style.transform = `translateY(${breathe.toFixed(2)}%) rotate(${(sway + tilt).toFixed(2)}deg) scale(${(1.015 + Math.sin(t * 1.4) * 0.004).toFixed(4)})`
       }
 
       if (now >= nextBlink && blinkStart === 0) {
         blinkStart = now
         nextBlink = now + 1800 + Math.random() * 3600
       }
-      // snap blink — no crossfade frames (ghosting between non-identical
-      // portrait variants looks wrong; a 1-frame swap reads as a real blink)
+      // snap blink — a 1-frame swap to eyes-closed reads as a real blink
       let lidsDown = false
       if (blinkStart > 0) {
         const elapsed = now - blinkStart
@@ -76,19 +56,14 @@ export function PortraitAvatar({
       }
       if (eyesRef.current) eyesRef.current.style.opacity = lidsDown ? '1' : '0'
 
-      // mouth: reveal the open-mouth frame proportionally to openness, and
-      // stretch it down a touch from the top lip so it reads as a jaw drop,
-      // not a decal fading in. Opacity capped below 1 so the neutral lips
-      // always ground it (avoids the doubled-mouth ghost of a full crossfade).
-      if (mouthRef.current) {
-        mouthRef.current.style.opacity = (open * 0.96).toFixed(3)
-        mouthRef.current.style.transform = `scaleY(${(0.72 + open * 0.5).toFixed(3)})`
-      }
-
+      // soft ring: pulses to her voice while speaking, to the mic while listening
       if (ringRef.current) {
         if (s === 'listening') {
           ringRef.current.style.opacity = String(0.3 + level * 0.5)
           ringRef.current.style.transform = `scale(${(1 + level * 0.06).toFixed(3)})`
+        } else if (s === 'speaking') {
+          ringRef.current.style.opacity = String(0.25 + level * 0.55)
+          ringRef.current.style.transform = `scale(${(1 + level * 0.05).toFixed(3)})`
         } else {
           ringRef.current.style.opacity = '0'
         }
@@ -113,7 +88,7 @@ export function PortraitAvatar({
     backgroundSize: `${10000 / box.w}% ${10000 / box.h}%`,
     backgroundPosition: `${((box.x - (box.dx ?? 0)) / (100 - box.w)) * 100}% ${((box.y - (box.dy ?? 0)) / (100 - box.h)) * 100}%`,
     opacity: 0,
-    // soft-edged mask so the crossfade region blends into the base portrait
+    // soft-edged mask so the blink region blends into the base portrait
     WebkitMaskImage: 'radial-gradient(ellipse 50% 50% at 50% 50%, black 55%, transparent 78%)',
     maskImage: 'radial-gradient(ellipse 50% 50% at 50% 50%, black 55%, transparent 78%)',
     pointerEvents: 'none',
@@ -121,7 +96,7 @@ export function PortraitAvatar({
 
   return (
     <div className={`relative aspect-square ${className ?? ''}`} role="img" aria-label="The Brain — your assistant">
-      {/* listening ring */}
+      {/* speaking / listening ring */}
       <div
         ref={ringRef}
         className="pointer-events-none absolute inset-0 rounded-full border-2 border-dashed border-safety-500 transition-none"
@@ -132,9 +107,7 @@ export function PortraitAvatar({
         <div ref={frameRef} className="relative h-full w-full will-change-transform">
           <img src={PORTRAIT.base} alt="" className="h-full w-full object-cover" draggable={false} />
           <div ref={eyesRef} style={region(PORTRAIT.eyes, PORTRAIT.eyesClosed)} aria-hidden />
-          {/* mouth: openness driven per-frame (opacity + scaleY jaw drop from the
-              top lip). No CSS transition — the rAF envelope already smooths it. */}
-          <div ref={mouthRef} style={{ ...region(PORTRAIT.mouth, PORTRAIT.mouthOpen), transformOrigin: 'top center', willChange: 'opacity, transform' }} aria-hidden />
+          {/* mouth overlay removed — she keeps her natural smile while talking */}
         </div>
       </div>
     </div>
