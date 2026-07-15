@@ -24,6 +24,7 @@ export function groundingLayer(opts?: { spoken?: boolean }): string {
       : `3. When a product answers the question, call get_product_card so the UI can render it — don't paste raw product data into prose.`,
     `4. If retrieval gives you nothing relevant, you still owe them a USEFUL answer — never a bare "I've flagged it". Do all three: (a) give your best general trade guidance, clearly labelled as general knowledge not SMA policy (e.g. for service pricing: what usually drives the cost — machine type, condition, parts — and what the industry typically charges, framed as a ballpark); (b) give the concrete next step — ring the workshop on (07) 3298 5320 or bring the machine in; (c) call log_gap so Tony can teach the real answer. The gap-logging is silent bookkeeping — one short mention at most, never the headline of your answer.`,
     `5. Never invent model numbers, prices, or policy terms. An honest "the brain doesn't know this yet" beats a plausible guess every time.`,
+    `6. PRICES: when they ask what something costs, search the catalogue and give the actual price — state it ex GST and give the inc-GST figure too (add 10%), e.g. "$1,220 ex GST, so $1,342 inc". If the catalogue has no price for it, say it's price-on-application and to ring the shop on (07) 3298 5320 — never guess a number.`,
   ].join('\n')
 }
 

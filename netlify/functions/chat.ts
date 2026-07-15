@@ -69,6 +69,8 @@ export default async function handler(req: Request): Promise<Response> {
         // (CLAUDE.md #5); the deep model stays on Draft where prose quality pays
         tier: 'fast',
         forceToolFirstRound: forceTool,
+        // text/chat surfaces render product cards; the voice call handles its own
+        renderProductCards: mode !== 'voice',
         // teaching from the call goes to the approval queue — admins only
         captureAsUser: mode === 'voice' && user.role === 'admin' && user.id !== MOCK_USER.id ? user.id : undefined,
         callerToken: user.role === 'admin' ? (/^Bearer\s+(.+)$/i.exec(req.headers.get('authorization') ?? '')?.[1] ?? null) : null,

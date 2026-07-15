@@ -116,6 +116,8 @@ export async function runAgent(opts: {
   tier?: 'main' | 'fast'
   /** Round 1 MUST call a tool. Fast models skip retrieval when a question "feels" unanswerable — this makes grounding structural, not advisory. */
   forceToolFirstRound?: boolean
+  /** Auto-render product cards for machines named in the answer (chat UI only; the voice call renders its own). */
+  renderProductCards?: boolean
   events: AgentEvents
 }): Promise<{ text: string }> {
   if (isMockLLM) return runMockAgent(opts)
@@ -130,6 +132,9 @@ export async function runAgent(opts: {
   let fullText = ''
   const citedTitles = new Map<string, string>()
   const productsSeen = new Map<string, ProductHit>()
+  const renderedProductIds = new Set<string>()
+  const renderedModels = new Set<string>() // dedup one card per machine across both render paths
+  const normModel = (m: string | null) => (m ?? '').replace(/[^a-z0-9]/gi, '').toLowerCase()
   const maxRounds = opts.maxToolRounds ?? 4
 
   const adminId = opts.captureAsUser ?? null
@@ -181,7 +186,11 @@ export async function runAgent(opts: {
           resultPayload = hits.map(({ id, sku, brand, model: m, name, category, price_ex_gst, url }) => ({ id, sku, brand, model: m, name, category, price_ex_gst, url }))
         } else if (tu.name === 'get_product_card') {
           const p = productsSeen.get(input.product_id ?? '')
-          if (p) opts.events.onProductCard({ ...p, fit_note: input.fit_note ?? '' })
+          if (p) {
+            opts.events.onProductCard({ ...p, fit_note: input.fit_note ?? '' })
+            renderedProductIds.add(p.id)
+            renderedModels.add(normModel(p.model))
+          }
           resultPayload = { rendered: Boolean(p) }
         } else if (tu.name === 'log_gap') {
           await logGap(input.question ?? '')
@@ -213,6 +222,44 @@ export async function runAgent(opts: {
       results.push({ type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify(resultPayload) })
     }
     messages.push({ role: 'user', content: results })
+  }
+
+  // Auto-surface a card for any product she NAMED in the answer — models don't
+  // reliably call get_product_card, so don't depend on it. Chat only (the voice
+  // bridge does its own on-screen cards from the transcript). Dedup by model,
+  // capped so we never flood the answer.
+  if (opts.renderProductCards) {
+    const normText = normModel(fullText)
+    let auto = 0
+    const tryEmit = (p: ProductHit): boolean => {
+      const nm = normModel(p.model)
+      if (nm.length < 2 || renderedModels.has(nm) || renderedProductIds.has(p.id)) return false
+      opts.events.onProductCard({ ...p, fit_note: '' })
+      renderedModels.add(nm)
+      renderedProductIds.add(p.id)
+      return true
+    }
+    // 1) products already searched that she named
+    for (const [, p] of productsSeen) {
+      if (auto >= 4) break
+      const nm = normModel(p.model)
+      if (nm.length >= 2 && normText.includes(nm) && tryEmit(p)) auto++
+    }
+    // 2) model numbers she named that weren't searched — look them up
+    if (auto < 4) {
+      const tokens = [...new Set((fullText.match(/\b[A-Za-z]{1,6}-?\d{1,4}[A-Za-z0-9-]*\b/g) ?? []))]
+      for (const tok of tokens) {
+        if (auto >= 4) break
+        if (renderedModels.has(normModel(tok))) continue
+        try {
+          const hits = await searchProducts(tok, 2)
+          const p = hits.find((h) => h.image_url && normText.includes(normModel(h.model))) ?? hits.find((h) => h.image_url)
+          if (p && tryEmit(p)) auto++
+        } catch {
+          /* a missed lookup just means no card */
+        }
+      }
+    }
   }
 
   // parse citations from <cited>...</cited>; fall back to everything retrieved

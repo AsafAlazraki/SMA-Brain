@@ -4,6 +4,7 @@ import { supabase, isSupabaseConfigured, getAccessToken } from '../../lib/supaba
 import { Markdown } from '../../lib/markdown'
 import { MicButton, SpeakButton } from '../../lib/voice-buttons'
 import { createSpeechStream, stripForSpeech } from '../../lib/voice'
+import { ProductPreviewCard } from '../../lib/products/ProductPreviewCard'
 import { Persona, type PersonaState } from '../../lib/persona/Persona'
 
 type ResponseMode = 'text' | 'voice' | 'both'
@@ -16,6 +17,7 @@ type ProductCard = {
   name: string
   price_ex_gst?: number
   url?: string
+  image_url?: string
   fit_note?: string
 }
 
@@ -379,27 +381,7 @@ export default function ChatPage() {
                 ))}
 
               {t.products?.map((p) => (
-                /* parts-bin label */
-                <a
-                  key={p.id}
-                  href={p.url ?? '#'}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="plate block rounded-md p-3.5 transition hover:!border-safety-500/60"
-                >
-                  <div className="flex items-baseline justify-between gap-3">
-                    <span className="stamp !text-denim-400">{p.sku ?? 'CATALOGUE'}</span>
-                    {p.price_ex_gst != null && (
-                      <span className="rounded-sm bg-safety-500 px-2 py-0.5 font-mono text-[13px] font-semibold text-safety-950">
-                        ${p.price_ex_gst.toLocaleString()} <span className="text-[10px]">EX GST</span>
-                      </span>
-                    )}
-                  </div>
-                  <p className="mt-1.5 text-[15px] font-semibold text-cloth-100">
-                    {p.brand} <span className="font-mono text-denim-300">{p.model}</span> — {p.name}
-                  </p>
-                  {p.fit_note && <p className="mt-1 text-[13px] leading-snug text-cloth-400">{p.fit_note}</p>}
-                </a>
+                <ProductPreviewCard key={p.id} p={p} />
               ))}
 
               {t.citations && t.citations.length > 0 && (

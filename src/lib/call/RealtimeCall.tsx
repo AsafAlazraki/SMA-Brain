@@ -2,6 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import { useConversation } from '@elevenlabs/react'
 import { getAccessToken } from '../supabase'
 import { Persona, type PersonaState } from '../persona/Persona'
+import { ProductPreviewCard, type ProductPreview } from '../products/ProductPreviewCard'
+
+// model-number-ish tokens she might say aloud: "LU-2810", "DDL-8700", "K6",
+// "K6-20", "NP-7A", "MO-6814AS". Fuzzy on purpose — a miss just yields no card.
+const MODEL_TOKEN = /\b[A-Za-z]{1,6}-?\d{1,4}[A-Za-z0-9-]*\b/g
 
 /**
  * The real call — ElevenLabs Conversational AI over WebRTC. ElevenLabs owns the
@@ -15,6 +20,8 @@ export function RealtimeCall({ onClose }: { onClose: () => void }) {
   const [phase, setPhase] = useState<'idle' | 'connecting' | 'live' | 'unavailable' | 'error'>('idle')
   const [note, setNote] = useState<string | null>(null)
   const [caption, setCaption] = useState('')
+  const [products, setProducts] = useState<ProductPreview[]>([])
+  const lookedUp = useRef<Set<string>>(new Set())
   const levelRef = useRef(0)
 
   const everConnected = useRef(false)
@@ -45,7 +52,10 @@ export function RealtimeCall({ onClose }: { onClose: () => void }) {
     onMessage: (msg: unknown) => {
       const m = msg as { message?: string; source?: string }
       // show what she's saying; ignore the transcript of our own speech
-      if (m.message && m.source !== 'user') setCaption(m.message)
+      if (m.message && m.source !== 'user') {
+        setCaption(m.message)
+        void detectProducts(m.message)
+      }
     },
   })
   const { status, isSpeaking, isListening } = conversation
@@ -85,9 +95,38 @@ export function RealtimeCall({ onClose }: { onClose: () => void }) {
     }
   }, [])
 
+  // she named a product aloud → pull its preview (photo + price) onto the screen
+  async function detectProducts(text: string) {
+    const tokens = [...new Set((text.match(MODEL_TOKEN) ?? []).map((t) => t.trim()).filter((t) => t.length >= 2))]
+    for (const tok of tokens) {
+      const key = tok.toLowerCase()
+      if (lookedUp.current.has(key)) continue
+      lookedUp.current.add(key)
+      try {
+        const token = await getAccessToken()
+        const res = await fetch(`/api/products/lookup?q=${encodeURIComponent(tok)}`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        })
+        if (!res.ok) continue
+        const body = (await res.json()) as { products?: ProductPreview[] }
+        if (body.products?.length) {
+          setProducts((prev) => {
+            const byId = new Map(prev.map((p) => [p.id, p]))
+            for (const p of body.products!) byId.set(p.id, p)
+            return [...byId.values()].slice(-4) // keep the last few she named
+          })
+        }
+      } catch {
+        /* a missed lookup just means no card — never break the call */
+      }
+    }
+  }
+
   async function start() {
     setNote(null)
     everConnected.current = false
+    setProducts([])
+    lookedUp.current = new Set()
     setPhase('connecting')
     try {
       // request the mic explicitly first — clearer failure than a silent drop
@@ -157,7 +196,11 @@ export function RealtimeCall({ onClose }: { onClose: () => void }) {
       </div>
 
       <div className="flex min-h-0 w-full flex-1 items-center justify-center px-6">
-        <Persona state={personaState} levelRef={levelRef} className="h-full max-h-[42vh] w-auto max-w-full sm:max-h-[48vh]" />
+        <Persona
+          state={personaState}
+          levelRef={levelRef}
+          className={`h-full w-auto max-w-full ${products.length ? 'max-h-[24vh]' : 'max-h-[42vh] sm:max-h-[48vh]'}`}
+        />
       </div>
 
       <div className="text-center">
@@ -176,7 +219,16 @@ export function RealtimeCall({ onClose }: { onClose: () => void }) {
       </div>
 
       <div className="mt-3 min-h-[84px] w-full max-w-xl px-6 text-center">
-        {caption && live && <p className="mx-auto max-h-24 overflow-y-auto text-[15px] leading-relaxed text-cloth-100">{caption}</p>}
+        {caption && live && (
+          <p className={`mx-auto overflow-y-auto text-[15px] leading-relaxed text-cloth-100 ${products.length ? 'mb-2 max-h-16 text-[14px] text-cloth-300' : 'max-h-24'}`}>{caption}</p>
+        )}
+        {products.length > 0 && live && (
+          <div className="mx-auto grid max-h-[30vh] max-w-md gap-2 overflow-y-auto text-left">
+            {products.map((p) => (
+              <ProductPreviewCard key={p.id} p={p} compact />
+            ))}
+          </div>
+        )}
         {phase === 'unavailable' && (
           <p className="text-[14px] leading-relaxed text-cloth-400">
             The live voice isn’t connected yet — it needs the ElevenLabs agent set up. Until then, use the <strong>Ask</strong> tab to type to the Brain.
