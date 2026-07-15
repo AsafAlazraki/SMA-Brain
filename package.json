@@ -27,6 +27,7 @@
     "db:reset": "supabase db reset"
   },
   "dependencies": {
+    "@elevenlabs/react": "^1.10.0",
     "@fontsource-variable/archivo": "^5.2.8",
     "@fontsource-variable/big-shoulders": "^5.2.6",
     "@fontsource/ibm-plex-mono": "^5.2.7",

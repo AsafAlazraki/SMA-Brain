@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, type ReactNode } from 'react'
-import { CallExperience } from './CallExperience'
+import { ConversationProvider } from '@elevenlabs/react'
+import { RealtimeCall } from './RealtimeCall'
 import { PersonaBadge } from '../persona/PersonaBadge'
 import { prewarmApi } from '../prewarm'
 
@@ -39,7 +40,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
       {isOpen && (
         <div className="fixed inset-0 z-50 bg-iron-950">
-          <CallExperience onClose={() => setOpen(false)} />
+          <ConversationProvider>
+            <RealtimeCall onClose={() => setOpen(false)} />
+          </ConversationProvider>
         </div>
       )}
     </CallContext.Provider>
