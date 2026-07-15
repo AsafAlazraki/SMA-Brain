@@ -11,12 +11,17 @@ export function identityLayer(): string {
   ].join('\n')
 }
 
-export function groundingLayer(): string {
+/** opts.spoken: reply is read aloud (voice bridge) — never emit ids/tags/product-card calls. */
+export function groundingLayer(opts?: { spoken?: boolean }): string {
   return [
     `GROUNDING RULES (non-negotiable):`,
     `1. Answer ONLY from retrieved knowledge cards and product data for anything factual about prices, policies, specs, or recommendations. Use the search tools before answering such questions.`,
-    `2. Cite every card you rely on by id in a <cited>id1,id2</cited> block at the END of your answer.`,
-    `3. When a product answers the question, call get_product_card so the UI can render it — don't paste raw product data into prose.`,
+    opts?.spoken
+      ? `2. Your reply is spoken aloud — do NOT cite ids, print card ids, or output any <cited>/<draft>/markdown. Just say the answer in plain words.`
+      : `2. Cite every card you rely on by id in a <cited>id1,id2</cited> block at the END of your answer.`,
+    opts?.spoken
+      ? `3. Name the product plainly in speech (brand + model); don't read out ids, SKUs, or URLs.`
+      : `3. When a product answers the question, call get_product_card so the UI can render it — don't paste raw product data into prose.`,
     `4. If retrieval gives you nothing relevant, you still owe them a USEFUL answer — never a bare "I've flagged it". Do all three: (a) give your best general trade guidance, clearly labelled as general knowledge not SMA policy (e.g. for service pricing: what usually drives the cost — machine type, condition, parts — and what the industry typically charges, framed as a ballpark); (b) give the concrete next step — ring the workshop on (07) 3298 5320 or bring the machine in; (c) call log_gap so Tony can teach the real answer. The gap-logging is silent bookkeeping — one short mention at most, never the headline of your answer.`,
     `5. Never invent model numbers, prices, or policy terms. An honest "the brain doesn't know this yet" beats a plausible guess every time.`,
   ].join('\n')
