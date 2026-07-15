@@ -17,13 +17,31 @@ export function RealtimeCall({ onClose }: { onClose: () => void }) {
   const [caption, setCaption] = useState('')
   const levelRef = useRef(0)
 
+  const everConnected = useRef(false)
   const conversation = useConversation({
-    onConnect: () => setPhase('live'),
-    onDisconnect: () => setPhase((p) => (p === 'error' ? p : 'idle')),
-    onError: (err: unknown) => {
-      setNote(typeof err === 'string' ? err : (err as { message?: string })?.message ?? 'Voice dropped out — try again.')
+    onConnect: () => {
+      everConnected.current = true
+      setPhase('live')
+    },
+    onDisconnect: (details: unknown) => {
+      const d = details as { reason?: string; message?: string; context?: { reason?: string; message?: string } } | undefined
+      const reason = d?.reason ?? d?.message ?? d?.context?.reason ?? d?.context?.message
+      console.log('[call] disconnect', JSON.stringify(details))
+      if (!everConnected.current) {
+        // never reached 'connected' → this was a connection failure, not a hang-up
+        setNote(reason ? `Couldn't connect: ${reason}` : "Couldn't connect — allow microphone access and try again.")
+        setPhase('error')
+      } else {
+        setPhase((p) => (p === 'error' ? p : 'idle'))
+      }
+    },
+    onError: (err: unknown, ctx?: unknown) => {
+      console.error('[call] error', err, ctx)
+      setNote(typeof err === 'string' ? err : (err as { message?: string })?.message ?? JSON.stringify(err) ?? 'Voice dropped out — try again.')
       setPhase('error')
     },
+    onStatusChange: (s: unknown) => console.log('[call] status', JSON.stringify(s)),
+    onDebug: (d: unknown) => console.log('[call] debug', JSON.stringify(d)),
     onMessage: (msg: unknown) => {
       const m = msg as { message?: string; source?: string }
       // show what she's saying; ignore the transcript of our own speech
@@ -32,12 +50,20 @@ export function RealtimeCall({ onClose }: { onClose: () => void }) {
   })
   const { status, isSpeaking, isListening } = conversation
 
-  // pulse the persona's ring to whoever's talking
+  // useConversation returns a NEW object on every state change, so anything
+  // depending on `conversation` in a deps array re-runs each render. Read it
+  // through a ref instead — critically, so the unmount cleanup doesn't fire
+  // mid-call and hang up the instant it connects.
+  const conversationRef = useRef(conversation)
+  conversationRef.current = conversation
+
+  // pulse the persona's ring to whoever's talking (single rAF, reads via ref)
   useEffect(() => {
     let raf = 0
     const tick = () => {
+      const conv = conversationRef.current
       try {
-        const v = isSpeaking ? conversation.getOutputVolume?.() : conversation.getInputVolume?.()
+        const v = conv.isSpeaking ? conv.getOutputVolume?.() : conv.getInputVolume?.()
         levelRef.current = typeof v === 'number' ? v : 0
       } catch {
         levelRef.current = 0
@@ -46,23 +72,32 @@ export function RealtimeCall({ onClose }: { onClose: () => void }) {
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [conversation, isSpeaking])
+  }, [])
 
-  // end the session if the overlay unmounts
+  // end the session ONLY when the overlay actually unmounts
   useEffect(() => {
     return () => {
       try {
-        conversation.endSession()
+        conversationRef.current.endSession()
       } catch {
         /* already closed */
       }
     }
-  }, [conversation])
+  }, [])
 
   async function start() {
     setNote(null)
+    everConnected.current = false
     setPhase('connecting')
     try {
+      // request the mic explicitly first — clearer failure than a silent drop
+      try {
+        await navigator.mediaDevices.getUserMedia({ audio: true })
+      } catch {
+        setNote('Microphone blocked — allow mic access for this site, then try again.')
+        setPhase('error')
+        return
+      }
       const token = await getAccessToken()
       const res = await fetch('/api/agent/token', { headers: token ? { Authorization: `Bearer ${token}` } : {} })
       if (res.status === 501) {
@@ -71,8 +106,11 @@ export function RealtimeCall({ onClose }: { onClose: () => void }) {
       }
       const body = (await res.json().catch(() => null)) as { token?: string; error?: string } | null
       if (!res.ok || !body?.token) throw new Error(body?.error ?? `Couldn't start the call (${res.status})`)
+      console.log('[call] starting session, token len', body.token.length)
       await conversation.startSession({ conversationToken: body.token, connectionType: 'webrtc' })
+      console.log('[call] startSession resolved, status', conversation.status)
     } catch (err) {
+      console.error('[call] start failed', err)
       setNote(err instanceof Error ? err.message : String(err))
       setPhase('error')
     }
